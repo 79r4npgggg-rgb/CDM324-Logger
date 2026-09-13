@@ -162,41 +162,42 @@ void board_oled_init(void)
         return;
     }
 
-    /* Some SSD1306 modules respond at 0x3C while others use 0x3D.
-     * Probing both addresses avoids hanging the boot path when the display is
-     * present but wired to the alternate address. */
+    /* The SSD1306 on the Seeed expansion board is fixed at 0x3C.
+     * In ESP-IDF v6, a direct device registration is the correct and more stable
+     * initialization path, and a probe is only a diagnostic check rather than a
+     * prerequisite for transaction setup.
+     */
     const uint8_t candidate_addrs[] = {BOARD_OLED_I2C_ADDR, 0x3D};
     bool found = false;
     for (size_t i = 0; i < sizeof(candidate_addrs) / sizeof(candidate_addrs[0]); ++i) {
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = candidate_addrs[i],
-            .scl_speed_hz = 100000,
+            .scl_speed_hz = 400000,
             .scl_wait_us = 0,
             .flags = {
                 .disable_ack_check = false,
             },
         };
 
-        ret = i2c_master_probe(s_i2c_bus, candidate_addrs[i], 1000);
-        if (ret != ESP_OK) {
-            ESP_LOGD(TAG, "OLED probe on 0x%02X failed: %s", candidate_addrs[i], esp_err_to_name(ret));
-            continue;
-        }
-
         ret = i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_oled_dev);
         if (ret == ESP_OK) {
             s_oled_i2c_addr = candidate_addrs[i];
             found = true;
-            ESP_LOGI(TAG, "OLED found at 0x%02X", s_oled_i2c_addr);
+            ESP_LOGI(TAG, "OLED device registered at 0x%02X", s_oled_i2c_addr);
             break;
         }
 
-        ESP_LOGW(TAG, "OLED add device failed at 0x%02X: %s", candidate_addrs[i], esp_err_to_name(ret));
+        ESP_LOGD(TAG, "OLED add device at 0x%02X failed: %s", candidate_addrs[i], esp_err_to_name(ret));
     }
 
     if (!found) {
-        ESP_LOGW(TAG, "OLED not detected on I2C bus; display is disabled.");
+        /* Keep the probe as a diagnostic only. The device handle is what matters for
+         * subsequent transactions; probing first is not required and can report
+         * timeout while the actual device is healthy. */
+        esp_err_t probe_ret = i2c_master_probe(s_i2c_bus, BOARD_OLED_I2C_ADDR, 100);
+        ESP_LOGW(TAG, "OLED not registered on I2C bus. probe(0x%02X) => %s",
+                 BOARD_OLED_I2C_ADDR, esp_err_to_name(probe_ret));
         s_oled_dev = NULL;
         return;
     }
