@@ -21,12 +21,19 @@ static const char *TAG = "app_main";
 #define APP_LOG_TICK_MS          10U
 
 static bool s_logging_enabled = false;
+static uint32_t s_last_oled_update_ms = 0U;
 
 static void app_show_oled_status(const cdm324_snapshot_t *snapshot)
 {
     if (snapshot == NULL) {
         return;
     }
+
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    if ((now_ms - s_last_oled_update_ms) < 1000U) {
+        return;
+    }
+    s_last_oled_update_ms = now_ms;
 
     if (board_oled_probe()) {
         board_oled_show_status(snapshot->freq_hz, snapshot->velocity_mmps, s_logging_enabled);
@@ -44,7 +51,7 @@ static void app_toggle_logging(void)
 
     ESP_LOGI(TAG, "Logging %s", s_logging_enabled ? "enabled" : "disabled");
     if (board_oled_probe()) {
-        board_oled_write_text(s_logging_enabled ? "LOG START" : "LOG STOP");
+        board_oled_write_text(s_logging_enabled ? "Now Logging..." : "Logging stopped");
     }
 }
 

@@ -14,6 +14,7 @@ static const char *TAG = "board";
 
 static i2c_master_bus_handle_t s_i2c_bus = NULL;
 static i2c_master_dev_handle_t s_oled_dev = NULL;
+static bool s_oled_probe_attempted = false;
 static uint8_t s_oled_buffer[128 * 8];
 static uint8_t s_oled_i2c_addr = BOARD_OLED_I2C_ADDR;
 
@@ -123,6 +124,12 @@ bool board_oled_probe(void)
         return true;
     }
 
+    if (s_oled_probe_attempted) {
+        return false;
+    }
+
+    s_oled_probe_attempted = true;
+
     if (s_i2c_bus != NULL) {
         i2c_del_master_bus(s_i2c_bus);
         s_i2c_bus = NULL;
@@ -182,6 +189,7 @@ void board_oled_init(void)
     }
 
     s_oled_i2c_addr = BOARD_OLED_I2C_ADDR;
+    s_oled_probe_attempted = true;
     ESP_LOGI(TAG, "OLED device registered at 0x%02X", s_oled_i2c_addr);
 
     static const uint8_t init_cmds[] = {
@@ -213,6 +221,7 @@ void board_oled_init(void)
         i2c_del_master_bus(s_i2c_bus);
         s_oled_dev = NULL;
         s_i2c_bus = NULL;
+        s_oled_probe_attempted = true;
         return;
     }
 
@@ -341,17 +350,27 @@ void board_diagnostics_run(void)
 
 void board_init(void)
 {
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << BOARD_GPIO_CDM324_INPUT) | (1ULL << BOARD_GPIO_LED) | (1ULL << BOARD_GPIO_LOG_BUTTON),
-        .mode = GPIO_MODE_INPUT_OUTPUT,
+    gpio_config_t input_conf = {
+        .pin_bit_mask = (1ULL << BOARD_GPIO_CDM324_INPUT) | (1ULL << BOARD_GPIO_LOG_BUTTON),
+        .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
+    gpio_config_t output_conf = {
+        .pin_bit_mask = (1ULL << BOARD_GPIO_LED),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
 
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    ESP_ERROR_CHECK(gpio_config(&input_conf));
+    ESP_ERROR_CHECK(gpio_config(&output_conf));
 
     gpio_set_level(BOARD_GPIO_LED, 0);
+    gpio_set_pull_mode(BOARD_GPIO_LOG_BUTTON, GPIO_PULLUP_ONLY);
+    gpio_set_direction(BOARD_GPIO_LOG_BUTTON, GPIO_MODE_INPUT);
 
     ESP_LOGI(TAG, "Board initialized");
 }
