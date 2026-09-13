@@ -148,7 +148,7 @@ void board_oled_init(void)
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
         .intr_priority = 0,
-        .trans_queue_depth = 20,
+        .trans_queue_depth = 64,
         .flags = {
             .enable_internal_pullup = true,
             .allow_pd = false,
@@ -162,71 +162,59 @@ void board_oled_init(void)
         return;
     }
 
-    /* The SSD1306 on the Seeed expansion board is fixed at 0x3C.
-     * In ESP-IDF v6, a direct device registration is the correct and more stable
-     * initialization path, and a probe is only a diagnostic check rather than a
-     * prerequisite for transaction setup.
-     */
-    const uint8_t candidate_addrs[] = {BOARD_OLED_I2C_ADDR, 0x3D};
-    bool found = false;
-    for (size_t i = 0; i < sizeof(candidate_addrs) / sizeof(candidate_addrs[0]); ++i) {
-        i2c_device_config_t dev_cfg = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = candidate_addrs[i],
-            .scl_speed_hz = 400000,
-            .scl_wait_us = 0,
-            .flags = {
-                .disable_ack_check = false,
-            },
-        };
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = BOARD_OLED_I2C_ADDR,
+        .scl_speed_hz = 400000,
+        .scl_wait_us = 0,
+        .flags = {
+            .disable_ack_check = false,
+        },
+    };
 
-        ret = i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_oled_dev);
-        if (ret == ESP_OK) {
-            s_oled_i2c_addr = candidate_addrs[i];
-            found = true;
-            ESP_LOGI(TAG, "OLED device registered at 0x%02X", s_oled_i2c_addr);
-            break;
-        }
-
-        ESP_LOGD(TAG, "OLED add device at 0x%02X failed: %s", candidate_addrs[i], esp_err_to_name(ret));
-    }
-
-    if (!found) {
-        /* Keep the probe as a diagnostic only. The device handle is what matters for
-         * subsequent transactions; probing first is not required and can report
-         * timeout while the actual device is healthy. */
-        esp_err_t probe_ret = i2c_master_probe(s_i2c_bus, BOARD_OLED_I2C_ADDR, 100);
-        ESP_LOGW(TAG, "OLED not registered on I2C bus. probe(0x%02X) => %s",
-                 BOARD_OLED_I2C_ADDR, esp_err_to_name(probe_ret));
+    ret = i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_oled_dev);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "OLED add device 0x%02X failed: %s", BOARD_OLED_I2C_ADDR, esp_err_to_name(ret));
+        i2c_del_master_bus(s_i2c_bus);
+        s_i2c_bus = NULL;
         s_oled_dev = NULL;
         return;
     }
 
-    oled_write_cmd(0xAE);
-    oled_write_cmd(0xD5);
-    oled_write_cmd(0x80);
-    oled_write_cmd(0xA8);
-    oled_write_cmd(0x3F);
-    oled_write_cmd(0xD3);
-    oled_write_cmd(0x00);
-    oled_write_cmd(0x40);
-    oled_write_cmd(0x8D);
-    oled_write_cmd(0x14);
-    oled_write_cmd(0x20);
-    oled_write_cmd(0x00);
-    oled_write_cmd(0xA1);
-    oled_write_cmd(0xC8);
-    oled_write_cmd(0xDA);
-    oled_write_cmd(0x12);
-    oled_write_cmd(0x81);
-    oled_write_cmd(0xCF);
-    oled_write_cmd(0xD9);
-    oled_write_cmd(0xF1);
-    oled_write_cmd(0xDB);
-    oled_write_cmd(0x40);
-    oled_write_cmd(0xA4);
-    oled_write_cmd(0xA6);
-    oled_write_cmd(0xAF);
+    s_oled_i2c_addr = BOARD_OLED_I2C_ADDR;
+    ESP_LOGI(TAG, "OLED device registered at 0x%02X", s_oled_i2c_addr);
+
+    static const uint8_t init_cmds[] = {
+        0xAE, 0xD5, 0x80,
+        0xA8, 0x3F,
+        0xD3, 0x00,
+        0x40,
+        0x8D, 0x14,
+        0x20, 0x00,
+        0xA1,
+        0xC8,
+        0xDA, 0x12,
+        0x81, 0xCF,
+        0xD9, 0xF1,
+        0xDB, 0x40,
+        0xA4,
+        0xA6,
+        0xAF
+    };
+
+    uint8_t init_packet[1 + sizeof(init_cmds)];
+    init_packet[0] = 0x00;
+    memcpy(&init_packet[1], init_cmds, sizeof(init_cmds));
+
+    ret = i2c_master_transmit(s_oled_dev, init_packet, sizeof(init_packet), 1000);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "OLED init sequence NACK/timeout: %s", esp_err_to_name(ret));
+        i2c_master_bus_rm_device(s_oled_dev);
+        i2c_del_master_bus(s_i2c_bus);
+        s_oled_dev = NULL;
+        s_i2c_bus = NULL;
+        return;
+    }
 
     board_oled_clear();
     ESP_LOGI(TAG, "OLED initialized");
@@ -239,6 +227,21 @@ void board_oled_clear(void)
     }
 
     memset(s_oled_buffer, 0, sizeof(s_oled_buffer));
+    for (int page = 0; page < 8; ++page) {
+        oled_set_cursor(page, 0);
+        oled_write_buf(&s_oled_buffer[page * 128], 128);
+    }
+}
+
+void board_oled_write_text(const char *text)
+{
+    if (s_oled_dev == NULL || text == NULL) {
+        return;
+    }
+
+    memset(s_oled_buffer, 0, sizeof(s_oled_buffer));
+    oled_draw_text(0, 0, text);
+
     for (int page = 0; page < 8; ++page) {
         oled_set_cursor(page, 0);
         oled_write_buf(&s_oled_buffer[page * 128], 128);

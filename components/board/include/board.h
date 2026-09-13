@@ -27,6 +27,7 @@ void board_init(void);
 void board_oled_init(void);
 bool board_oled_probe(void);
 void board_oled_clear(void);
+void board_oled_write_text(const char *text);
 void board_oled_show_status(int32_t raw_hz, int32_t velocity_mmps, bool logging_active);
 void board_i2c_scan(void);
 void board_diagnostics_run(void);

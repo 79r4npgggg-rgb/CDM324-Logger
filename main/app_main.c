@@ -1,3 +1,5 @@
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include "driver/gpio.h"
@@ -14,40 +16,132 @@
 
 static const char *TAG = "app_main";
 
-#define APP_BUTTON_LONG_PRESS_US 2000000UL
-#define TEST_MODE_I2C_SCAN 0
-#define TEST_MODE_SD 1
-#define TEST_MODE_BOTH 2
-#define TEST_MODE TEST_MODE_I2C_SCAN
+#define APP_BUTTON_POLL_MS       10U
+#define APP_BUTTON_LONG_PRESS_MS 2000U
+#define APP_LOG_TICK_MS          10U
+
+static bool s_logging_enabled = false;
+
+static void app_show_oled_status(const cdm324_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) {
+        return;
+    }
+
+    if (board_oled_probe()) {
+        board_oled_show_status(snapshot->freq_hz, snapshot->velocity_mmps, s_logging_enabled);
+    }
+}
+
+static void app_toggle_logging(void)
+{
+    s_logging_enabled = !s_logging_enabled;
+    if (!csv_logger_set_logging_enabled(s_logging_enabled)) {
+        ESP_LOGE(TAG, "Failed to %s logging", s_logging_enabled ? "start" : "stop");
+        s_logging_enabled = false;
+        return;
+    }
+
+    ESP_LOGI(TAG, "Logging %s", s_logging_enabled ? "enabled" : "disabled");
+    if (board_oled_probe()) {
+        board_oled_write_text(s_logging_enabled ? "LOG START" : "LOG STOP");
+    }
+}
+
+static bool app_button_pressed(void)
+{
+    return gpio_get_level(BOARD_GPIO_LOG_BUTTON) == 0;
+}
+
+static void app_handle_button(void)
+{
+    static bool last_pressed = false;
+    static uint32_t press_start_ms = 0;
+
+    const bool pressed = app_button_pressed();
+    if (!last_pressed && pressed) {
+        press_start_ms = esp_timer_get_time() / 1000ULL;
+        last_pressed = true;
+        return;
+    }
+
+    if (!pressed) {
+        last_pressed = false;
+        press_start_ms = 0;
+        return;
+    }
+
+    if ((esp_timer_get_time() / 1000ULL - press_start_ms) >= APP_BUTTON_LONG_PRESS_MS) {
+        app_toggle_logging();
+        while (app_button_pressed()) {
+            vTaskDelay(pdMS_TO_TICKS(APP_BUTTON_POLL_MS));
+        }
+        last_pressed = false;
+        press_start_ms = 0;
+    }
+}
 
 void app_main(void)
 {
     app_config_init();
     board_init();
 
-#if TEST_MODE == TEST_MODE_I2C_SCAN
-    ESP_LOGI(TAG, "=== I2C SCAN ONLY TEST START ===");
-    ESP_LOGI(TAG, "Target: SDA=GPIO5, SCL=GPIO6, scan 0x01..0x7F");
-    board_i2c_scan();
-    ESP_LOGI(TAG, "I2C scan complete. No OLED draw or init attempted.");
-    ESP_LOGI(TAG, "I2C-only test complete. Waiting for reset.");
-#elif TEST_MODE == TEST_MODE_SD
-    ESP_LOGI(TAG, "=== SD ONLY TEST START ===");
-    const bool sd_ok = sdcard_probe();
-    ESP_LOGI(TAG, "SD TEST RESULT: %s", sd_ok ? "PASS" : "FAIL");
-    ESP_LOGI(TAG, "SD-only test complete. Waiting for reset.");
-#else
-    ESP_LOGI(TAG, "=== OLED TEST START ===");
-    const bool oled_ok = board_oled_probe();
-    ESP_LOGI(TAG, "OLED TEST RESULT: %s", oled_ok ? "PASS" : "FAIL");
+    gpio_set_pull_mode(BOARD_GPIO_LOG_BUTTON, GPIO_PULLUP_ONLY);
+    gpio_set_direction(BOARD_GPIO_LOG_BUTTON, GPIO_MODE_INPUT);
 
-    ESP_LOGI(TAG, "=== SD TEST START ===");
-    const bool sd_ok = sdcard_probe();
-    ESP_LOGI(TAG, "SD TEST RESULT: %s", sd_ok ? "PASS" : "FAIL");
-    ESP_LOGI(TAG, "Hardware test complete. Waiting for reset.");
-#endif
+    if (!sdcard_init()) {
+        ESP_LOGE(TAG, "SD card init failed; logger will remain disabled");
+    }
 
+    if (!csv_logger_init()) {
+        ESP_LOGE(TAG, "CSV logger init failed");
+    }
+
+    if (!cdm324_init()) {
+        ESP_LOGE(TAG, "CDM324 init failed");
+        while (1) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
+    if (!cdm324_start()) {
+        ESP_LOGE(TAG, "CDM324 start failed");
+        while (1) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
+    board_oled_init();
+    if (board_oled_probe()) {
+        board_oled_write_text("CDM324 Logger");
+    }
+
+    ESP_LOGI(TAG, "Logger ready. Hold button for 2s to toggle logging.");
+
+    uint32_t last_snapshot_time_us = 0;
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        app_handle_button();
+
+        cdm324_snapshot_t snapshot;
+        if (cdm324_get_latest_snapshot(&snapshot)) {
+            if (snapshot.time_us != last_snapshot_time_us) {
+                last_snapshot_time_us = snapshot.time_us;
+                app_show_oled_status(&snapshot);
+
+                if (s_logging_enabled) {
+                    csv_snapshot_t csv_snapshot = {
+                        .time_us = snapshot.time_us,
+                        .level = snapshot.level,
+                        .freq_hz = snapshot.freq_hz,
+                        .velocity_mmps = snapshot.velocity_mmps,
+                        .status = snapshot.status,
+                    };
+                    csv_logger_queue_snapshot(&csv_snapshot);
+                    csv_logger_flush_pending();
+                }
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(APP_LOG_TICK_MS));
     }
 }
