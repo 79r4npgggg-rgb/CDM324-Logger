@@ -60,17 +60,46 @@ static bool app_button_pressed(void)
     return gpio_get_level(BOARD_GPIO_LOG_BUTTON) == 0;
 }
 
+typedef enum {
+    APP_BUTTON_RELEASED,
+    APP_BUTTON_PRESSED,
+    APP_BUTTON_LONG_PRESS_DETECTED,
+} app_button_state_t;
+
 static void app_handle_button(void)
 {
-    static bool last_pressed = false;
+    static app_button_state_t state = APP_BUTTON_RELEASED;
+    static uint32_t press_start_ms = 0U;
 
     const bool pressed = app_button_pressed();
+    const uint32_t now_ms =
+        (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-    ESP_LOGI(TAG, "GPIO2=%d", gpio_get_level(GPIO_NUM_2));
+    switch (state) {
+    case APP_BUTTON_RELEASED:
+        if (pressed) {
+            press_start_ms = now_ms;
+            state = APP_BUTTON_PRESSED;
+            ESP_LOGI(TAG, "BUTTON PRESSED");
+        }
+        break;
 
-    if (pressed != last_pressed) {
-        ESP_LOGI(TAG, "BUTTON %s", pressed ? "PRESSED" : "RELEASED");
-        last_pressed = pressed;
+    case APP_BUTTON_PRESSED:
+        if (!pressed) {
+            state = APP_BUTTON_RELEASED;
+            ESP_LOGI(TAG, "BUTTON RELEASED");
+        } else if ((now_ms - press_start_ms) >= APP_BUTTON_LONG_PRESS_MS) {
+            app_toggle_logging();
+            state = APP_BUTTON_LONG_PRESS_DETECTED;
+        }
+        break;
+
+    case APP_BUTTON_LONG_PRESS_DETECTED:
+        if (!pressed) {
+            state = APP_BUTTON_RELEASED;
+            ESP_LOGI(TAG, "BUTTON RELEASED");
+        }
+        break;
     }
 }
 
