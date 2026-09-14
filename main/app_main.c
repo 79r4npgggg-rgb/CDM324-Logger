@@ -63,28 +63,12 @@ static bool app_button_pressed(void)
 static void app_handle_button(void)
 {
     static bool last_pressed = false;
-    static uint32_t press_start_ms = 0;
 
     const bool pressed = app_button_pressed();
-    if (!last_pressed && pressed) {
-        press_start_ms = esp_timer_get_time() / 1000ULL;
-        last_pressed = true;
-        return;
-    }
 
-    if (!pressed) {
-        last_pressed = false;
-        press_start_ms = 0;
-        return;
-    }
-
-    if ((esp_timer_get_time() / 1000ULL - press_start_ms) >= APP_BUTTON_LONG_PRESS_MS) {
-        app_toggle_logging();
-        while (app_button_pressed()) {
-            vTaskDelay(pdMS_TO_TICKS(APP_BUTTON_POLL_MS));
-        }
-        last_pressed = false;
-        press_start_ms = 0;
+    if (pressed != last_pressed) {
+        ESP_LOGI(TAG, "BUTTON %s", pressed ? "PRESSED" : "RELEASED");
+        last_pressed = pressed;
     }
 }
 
