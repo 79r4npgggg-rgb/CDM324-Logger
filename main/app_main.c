@@ -66,7 +66,7 @@ static void app_handle_button(void)
 
     const bool pressed = app_button_pressed();
 
-    ESP_LOGI(TAG, "GPIO1=%d", gpio_get_level(GPIO_NUM_1));
+    ESP_LOGI(TAG, "GPIO2=%d", gpio_get_level(GPIO_NUM_2));
 
     if (pressed != last_pressed) {
         ESP_LOGI(TAG, "BUTTON %s", pressed ? "PRESSED" : "RELEASED");

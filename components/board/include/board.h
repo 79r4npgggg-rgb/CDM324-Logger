@@ -5,8 +5,8 @@
 
 #include "driver/gpio.h"
 
-#define BOARD_GPIO_CDM324_INPUT    GPIO_NUM_2
-#define BOARD_GPIO_LOG_BUTTON      GPIO_NUM_1  // Seeed XIAO Expansion Board D1 button -> GPIO1
+#define BOARD_GPIO_CDM324_INPUT    GPIO_NUM_4
+#define BOARD_GPIO_LOG_BUTTON      GPIO_NUM_2  // Seeed XIAO Expansion Board D1 button -> GPIO2
 /* Per the official Seeed XIAO pinout and SD sample code, the board LED is on GPIO21.
  * The SD card CS is D2 on the XIAO board, which maps to GPIO3. */
 #define BOARD_GPIO_LED             GPIO_NUM_21
