@@ -333,7 +333,7 @@ void board_i2c_scan(void)
 void board_diagnostics_run(void)
 {
     ESP_LOGI(TAG, "GPIO map review:");
-    ESP_LOGI(TAG, "  CDM324  : GPIO%d", BOARD_GPIO_CDM324_INPUT);
+    ESP_LOGI(TAG, "  CDM324  : GPIO%d", BOARD_GPIO_CDM324_FOUT);
     ESP_LOGI(TAG, "  Button  : GPIO%d", BOARD_GPIO_LOG_BUTTON);
     ESP_LOGI(TAG, "  LED     : GPIO%d", BOARD_GPIO_LED);
     ESP_LOGI(TAG, "  OLED I2C: SDA=%d SCL=%d ADDR=0x%02X", BOARD_I2C_SDA_GPIO, BOARD_I2C_SCL_GPIO, BOARD_OLED_I2C_ADDR);
@@ -351,7 +351,8 @@ void board_diagnostics_run(void)
 void board_init(void)
 {
     gpio_config_t input_conf = {
-        .pin_bit_mask = (1ULL << BOARD_GPIO_CDM324_INPUT) | (1ULL << BOARD_GPIO_LOG_BUTTON),
+    .pin_bit_mask = (1ULL << BOARD_GPIO_CDM324_FOUT) |
+                    (1ULL << BOARD_GPIO_LOG_BUTTON),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
