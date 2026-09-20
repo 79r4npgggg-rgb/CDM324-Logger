@@ -22,13 +22,14 @@ static void csv_logger_format_line(char *out, size_t out_size, const csv_snapsho
         return;
     }
 
-    snprintf(out, out_size,
-             "%lu,%ld,%ld,%ld,%lu\n",
-             (unsigned long)snapshot->time_us,
-             (long)snapshot->level,
-             (long)snapshot->freq_hz,
-             (long)snapshot->velocity_mmps,
-             (unsigned long)snapshot->status);
+snprintf(out, out_size,
+         "%lu,%ld,%ld,%ld,%ld,%lu\n",
+         (unsigned long)snapshot->time_us,
+         (long)snapshot->vout_mv,
+         (long)snapshot->fout_hz,
+         (long)snapshot->level,
+         (long)snapshot->velocity_mmps,
+         (unsigned long)snapshot->status);
 }
 
 bool csv_logger_init(void)

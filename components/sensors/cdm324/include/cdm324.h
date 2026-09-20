@@ -21,6 +21,7 @@ typedef struct {
     int32_t level;
     int32_t freq_hz;
     int32_t velocity_mmps;
+    int32_t vout_mv;
 } cdm324_snapshot_t;
 
 int32_t cdm324_velocity_mmps_from_freq_hz(int32_t freq_hz, uint32_t wheel_diameter_mm);

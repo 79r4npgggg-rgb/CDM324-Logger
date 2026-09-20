@@ -151,13 +151,14 @@ void app_main(void)
                 app_show_oled_status(&snapshot);
 
                 if (s_logging_enabled) {
-                    csv_snapshot_t csv_snapshot = {
-                        .time_us = snapshot.time_us,
-                        .level = snapshot.level,
-                        .freq_hz = snapshot.freq_hz,
-                        .velocity_mmps = snapshot.velocity_mmps,
-                        .status = snapshot.status,
-                    };
+                csv_snapshot_t csv_snapshot = {
+                    .time_us = snapshot.time_us,
+                    .vout_mv = snapshot.vout_mv,
+                    .fout_hz = snapshot.freq_hz,
+                    .level = snapshot.level,
+                    .velocity_mmps = snapshot.velocity_mmps,
+                    .status = snapshot.status,
+                };
                     csv_logger_queue_snapshot(&csv_snapshot);
                     csv_logger_flush_pending();
                 }

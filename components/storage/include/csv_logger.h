@@ -3,12 +3,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CSV_LOG_HEADER "time_us,level,freq_hz,velocity_mmps,status\n"
+#define CSV_LOG_HEADER \
+    "time_us,vout_mv,fout_hz,level,velocity_mmps,status\n"
 
 typedef struct {
     uint32_t time_us;
+    int32_t vout_mv;
+    int32_t fout_hz;
     int32_t level;
-    int32_t freq_hz;
     int32_t velocity_mmps;
     uint32_t status;
 } csv_snapshot_t;
