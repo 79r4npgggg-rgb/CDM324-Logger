@@ -174,8 +174,13 @@ gpio_config_t io_conf = {
         return false;
     }
 
-    if (gpio_isr_handler_add(BOARD_GPIO_CDM324_INPUT, cdm324_gpio_isr_handler, NULL) != ESP_OK) {
+    if (gpio_isr_handler_add(BOARD_GPIO_CDM324_FOUT, cdm324_gpio_isr_handler, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add GPIO ISR handler");
+        return false;
+    }
+
+    if (!cdm324_adc_init()) {
+        ESP_LOGE(TAG, "Failed to initialize VOUT ADC");
         return false;
     }
 
