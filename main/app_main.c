@@ -18,7 +18,7 @@ static const char *TAG = "app_main";
 
 #define APP_BUTTON_POLL_MS       10U
 #define APP_BUTTON_LONG_PRESS_MS 2000U
-#define APP_LOG_TICK_MS          10U
+#define APP_LOG_TICK_MS          1U
 
 static bool s_logging_enabled = false;
 static uint32_t s_last_oled_update_ms = 0U;
@@ -29,29 +29,47 @@ static void app_show_oled_status(const cdm324_snapshot_t *snapshot)
         return;
     }
 
-    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    const uint32_t now_ms =
+        (uint32_t)(esp_timer_get_time() / 1000ULL);
+
     if ((now_ms - s_last_oled_update_ms) < 1000U) {
         return;
     }
+
     s_last_oled_update_ms = now_ms;
 
     if (board_oled_probe()) {
-        board_oled_show_status(snapshot->freq_hz, snapshot->velocity_mmps, s_logging_enabled);
+        board_oled_show_status(
+            snapshot->freq_hz,
+            snapshot->velocity_mmps,
+            s_logging_enabled);
     }
 }
 
 static void app_toggle_logging(void)
 {
     s_logging_enabled = !s_logging_enabled;
+
     if (!csv_logger_set_logging_enabled(s_logging_enabled)) {
-        ESP_LOGE(TAG, "Failed to %s logging", s_logging_enabled ? "start" : "stop");
+        ESP_LOGE(
+            TAG,
+            "Failed to %s logging",
+            s_logging_enabled ? "start" : "stop");
+
         s_logging_enabled = false;
         return;
     }
 
-    ESP_LOGI(TAG, "Logging %s", s_logging_enabled ? "enabled" : "disabled");
+    ESP_LOGI(
+        TAG,
+        "Logging %s",
+        s_logging_enabled ? "enabled" : "disabled");
+
     if (board_oled_probe()) {
-        board_oled_write_text(s_logging_enabled ? "Now Logging..." : "Logging stopped");
+        board_oled_write_text(
+            s_logging_enabled
+                ? "Now Logging..."
+                : "Logging stopped");
     }
 }
 
@@ -72,6 +90,7 @@ static void app_handle_button(void)
     static uint32_t press_start_ms = 0U;
 
     const bool pressed = app_button_pressed();
+
     const uint32_t now_ms =
         (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -80,6 +99,7 @@ static void app_handle_button(void)
         if (pressed) {
             press_start_ms = now_ms;
             state = APP_BUTTON_PRESSED;
+
             ESP_LOGI(TAG, "BUTTON PRESSED");
         }
         break;
@@ -87,6 +107,7 @@ static void app_handle_button(void)
     case APP_BUTTON_PRESSED:
         if (!pressed) {
             state = APP_BUTTON_RELEASED;
+
             ESP_LOGI(TAG, "BUTTON RELEASED");
         } else if ((now_ms - press_start_ms) >= APP_BUTTON_LONG_PRESS_MS) {
             app_toggle_logging();
@@ -97,6 +118,7 @@ static void app_handle_button(void)
     case APP_BUTTON_LONG_PRESS_DETECTED:
         if (!pressed) {
             state = APP_BUTTON_RELEASED;
+
             ESP_LOGI(TAG, "BUTTON RELEASED");
         }
         break;
@@ -108,11 +130,18 @@ void app_main(void)
     app_config_init();
     board_init();
 
-    gpio_set_pull_mode(BOARD_GPIO_LOG_BUTTON, GPIO_PULLUP_ONLY);
-    gpio_set_direction(BOARD_GPIO_LOG_BUTTON, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(
+        BOARD_GPIO_LOG_BUTTON,
+        GPIO_PULLUP_ONLY);
+
+    gpio_set_direction(
+        BOARD_GPIO_LOG_BUTTON,
+        GPIO_MODE_INPUT);
 
     if (!sdcard_init()) {
-        ESP_LOGE(TAG, "SD card init failed; logger will remain disabled");
+        ESP_LOGE(
+            TAG,
+            "SD card init failed; logger will remain disabled");
     }
 
     if (!csv_logger_init()) {
@@ -121,6 +150,7 @@ void app_main(void)
 
     if (!cdm324_init()) {
         ESP_LOGE(TAG, "CDM324 init failed");
+
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
@@ -128,60 +158,67 @@ void app_main(void)
 
     if (!cdm324_start()) {
         ESP_LOGE(TAG, "CDM324 start failed");
+
         while (1) {
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
     }
 
     board_oled_init();
+
     if (board_oled_probe()) {
         board_oled_write_text("CDM324 Logger");
     }
 
-    ESP_LOGI(TAG, "Logger ready. Hold button for 2s to toggle logging.");
+    ESP_LOGI(
+        TAG,
+        "Logger ready. Hold button for 2s to toggle logging.");
 
-    uint32_t last_snapshot_time_us = 0;
+    /*
+     * Fixed-period snapshot scheduler.
+     *
+     * Snapshot generation is independent of FOUT edge events.
+     * FOUT capture only updates the latest CDM324 measurement.
+     */
+    const app_config_t *config = app_config_get();
+
+    uint32_t next_snapshot_time_us =
+        (uint32_t)esp_timer_get_time();
+
     while (1) {
         app_handle_button();
 
-        cdm324_snapshot_t snapshot;
-        if (cdm324_get_latest_snapshot(&snapshot)) {
-            uint32_t next_snapshot_time_us =
-                (uint32_t)esp_timer_get_time();
+        const uint32_t now_us =
+            (uint32_t)esp_timer_get_time();
 
-            while (1) {
-                app_handle_button();
+        if ((int32_t)(now_us - next_snapshot_time_us) >= 0) {
+            next_snapshot_time_us +=
+                config->snapshot_period_ms * 1000U;
 
-                uint32_t now_us = (uint32_t)esp_timer_get_time();
+            cdm324_snapshot_t snapshot;
 
-                if ((int32_t)(now_us - next_snapshot_time_us) >= 0) {
-                    next_snapshot_time_us +=
-                        app_config_get()->snapshot_period_ms * 1000U;
+            if (cdm324_get_latest_snapshot(&snapshot)) {
+                /*
+                 * This timestamp represents the actual
+                 * fixed-period sampling time, not the FOUT edge time.
+                 */
+                snapshot.time_us = now_us;
 
-                    cdm324_snapshot_t snapshot;
+                app_show_oled_status(&snapshot);
 
-                    if (cdm324_get_latest_snapshot(&snapshot)) {
-                        snapshot.time_us = now_us;
+                if (s_logging_enabled) {
+                    csv_snapshot_t csv_snapshot = {
+                        .time_us = snapshot.time_us,
+                        .vout_mv = snapshot.vout_mv,
+                        .fout_hz = snapshot.freq_hz,
+                        .level = snapshot.level,
+                        .velocity_mmps = snapshot.velocity_mmps,
+                        .status = snapshot.status,
+                    };
 
-                        app_show_oled_status(&snapshot);
-
-                        if (s_logging_enabled) {
-                            csv_snapshot_t csv_snapshot = {
-                                .time_us = snapshot.time_us,
-                                .vout_mv = snapshot.vout_mv,
-                                .fout_hz = snapshot.freq_hz,
-                                .level = snapshot.level,
-                                .velocity_mmps = snapshot.velocity_mmps,
-                                .status = snapshot.status,
-                            };
-
-                            csv_logger_queue_snapshot(&csv_snapshot);
-                            csv_logger_flush_pending();
-                        }
-                    }
+                    csv_logger_queue_snapshot(&csv_snapshot);
+                    csv_logger_flush_pending();
                 }
-
-                vTaskDelay(pdMS_TO_TICKS(1));
             }
         }
 

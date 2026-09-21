@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define APP_SNAPSHOT_PERIOD_MS      1U
+#define APP_SNAPSHOT_PERIOD_MS      10U
 #define APP_CDM324_WHEEL_DIAMETER_MM 60U
 #define APP_CSV_BUFFER_LINES        32U
 #define APP_CSV_LINE_MAX_LEN        128U
