@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "dsps_fft2r.h"
 #include "driver/gpio.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_adc/adc_cali.h"
@@ -297,10 +298,6 @@ static bool cdm324_fft_init(void)
     /*
      * ESP-DSP FFT table initialization.
      */
-    extern esp_err_t dsps_fft2r_init_fc32(
-        float *fft_table_buff,
-        int table_size);
-
     esp_err_t ret =
         dsps_fft2r_init_fc32(
             NULL,
@@ -563,16 +560,6 @@ static void cdm324_analyze_frame(
      * FFT
      * --------------------------------------------------------
      */
-
-    extern esp_err_t dsps_fft2r_fc32(
-        float *data,
-        int N);
-
-
-    extern esp_err_t dsps_bit_rev_fc32(
-        float *data,
-        int N);
-
 
     esp_err_t ret =
         dsps_fft2r_fc32(
