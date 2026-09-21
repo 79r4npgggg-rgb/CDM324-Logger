@@ -141,7 +141,6 @@ static void cdm324_capture_task(void *arg)
 
             s_last_edge_us = event.timestamp_us;
             s_last_time_us = event.timestamp_us;
-            vTaskDelay(pdMS_TO_TICKS(config->snapshot_period_ms));
         }
     }
 }

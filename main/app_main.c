@@ -146,22 +146,42 @@ void app_main(void)
 
         cdm324_snapshot_t snapshot;
         if (cdm324_get_latest_snapshot(&snapshot)) {
-            if (snapshot.time_us != last_snapshot_time_us) {
-                last_snapshot_time_us = snapshot.time_us;
-                app_show_oled_status(&snapshot);
+            uint32_t next_snapshot_time_us =
+                (uint32_t)esp_timer_get_time();
 
-                if (s_logging_enabled) {
-                csv_snapshot_t csv_snapshot = {
-                    .time_us = snapshot.time_us,
-                    .vout_mv = snapshot.vout_mv,
-                    .fout_hz = snapshot.freq_hz,
-                    .level = snapshot.level,
-                    .velocity_mmps = snapshot.velocity_mmps,
-                    .status = snapshot.status,
-                };
-                    csv_logger_queue_snapshot(&csv_snapshot);
-                    csv_logger_flush_pending();
+            while (1) {
+                app_handle_button();
+
+                uint32_t now_us = (uint32_t)esp_timer_get_time();
+
+                if ((int32_t)(now_us - next_snapshot_time_us) >= 0) {
+                    next_snapshot_time_us +=
+                        app_config_get()->snapshot_period_ms * 1000U;
+
+                    cdm324_snapshot_t snapshot;
+
+                    if (cdm324_get_latest_snapshot(&snapshot)) {
+                        snapshot.time_us = now_us;
+
+                        app_show_oled_status(&snapshot);
+
+                        if (s_logging_enabled) {
+                            csv_snapshot_t csv_snapshot = {
+                                .time_us = snapshot.time_us,
+                                .vout_mv = snapshot.vout_mv,
+                                .fout_hz = snapshot.freq_hz,
+                                .level = snapshot.level,
+                                .velocity_mmps = snapshot.velocity_mmps,
+                                .status = snapshot.status,
+                            };
+
+                            csv_logger_queue_snapshot(&csv_snapshot);
+                            csv_logger_flush_pending();
+                        }
+                    }
                 }
+
+                vTaskDelay(pdMS_TO_TICKS(1));
             }
         }
 
