@@ -206,7 +206,7 @@ static bool cdm324_adc_init(void)
         .sample_freq_hz =
             CDM324_ADC_SAMPLE_RATE_HZ,
         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
-        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
+        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
     };
 
 
@@ -392,12 +392,12 @@ static bool cdm324_read_frame(
             /*
              * ESP32-S3 uses TYPE1 format.
              */
-            if (data->type1.unit != ADC_UNIT_1) {
+            if (data->type2.unit != ADC_UNIT_1) {
                 continue;
             }
 
 
-            if (data->type1.channel !=
+            if (data->type2.channel !=
                 CDM324_ADC_CHANNEL) {
 
                 continue;
@@ -408,7 +408,7 @@ static bool cdm324_read_frame(
                 sample_count) {
 
                 samples[sample_index++] =
-                    data->type1.data;
+                    data->type2.data;
             }
         }
     }
@@ -416,7 +416,6 @@ static bool cdm324_read_frame(
 
     return true;
 }
-
 
 /*
  * ============================================================
