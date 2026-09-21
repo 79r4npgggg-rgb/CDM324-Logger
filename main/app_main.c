@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 
 #include "app_config.h"
@@ -19,9 +20,22 @@ static const char *TAG = "app_main";
 #define APP_BUTTON_POLL_MS       10U
 #define APP_BUTTON_LONG_PRESS_MS 2000U
 #define APP_LOG_TICK_MS          10U
+#define APP_BUTTON_EVENT_QUEUE_LEN 4U
 
 static bool s_logging_enabled = false;
 static uint32_t s_last_oled_update_ms = 0U;
+
+typedef enum {
+    APP_BUTTON_RELEASED,
+    APP_BUTTON_PRESSED,
+    APP_BUTTON_LONG_PRESS_DETECTED,
+} app_button_state_t;
+
+typedef enum {
+    APP_BUTTON_EVENT_LONG_PRESS,
+} app_button_event_t;
+
+static QueueHandle_t s_button_event_queue = NULL;
 
 static void app_show_oled_status(const cdm324_snapshot_t *snapshot)
 {
@@ -78,12 +92,6 @@ static bool app_button_pressed(void)
     return gpio_get_level(BOARD_GPIO_LOG_BUTTON) == 0;
 }
 
-typedef enum {
-    APP_BUTTON_RELEASED,
-    APP_BUTTON_PRESSED,
-    APP_BUTTON_LONG_PRESS_DETECTED,
-} app_button_state_t;
-
 static void app_handle_button(void)
 {
     static app_button_state_t state = APP_BUTTON_RELEASED;
@@ -110,7 +118,21 @@ static void app_handle_button(void)
 
             ESP_LOGI(TAG, "BUTTON RELEASED");
         } else if ((now_ms - press_start_ms) >= APP_BUTTON_LONG_PRESS_MS) {
-            app_toggle_logging();
+
+            app_button_event_t event =
+                APP_BUTTON_EVENT_LONG_PRESS;
+
+            if (s_button_event_queue == NULL ||
+                xQueueSend(
+                    s_button_event_queue,
+                    &event,
+                    0) != pdTRUE) {
+
+                ESP_LOGW(
+                    TAG,
+                    "Button event queue full");
+            }
+
             state = APP_BUTTON_LONG_PRESS_DETECTED;
         }
         break;
@@ -122,6 +144,17 @@ static void app_handle_button(void)
             ESP_LOGI(TAG, "BUTTON RELEASED");
         }
         break;
+    }
+}
+
+static void app_button_task(void *arg)
+{
+    (void)arg;
+
+    while (1) {
+        app_handle_button();
+
+        vTaskDelay(pdMS_TO_TICKS(APP_BUTTON_POLL_MS));
     }
 }
 
@@ -170,23 +203,61 @@ void app_main(void)
         board_oled_write_text("CDM324 Logger");
     }
 
+    s_button_event_queue =
+        xQueueCreate(
+            APP_BUTTON_EVENT_QUEUE_LEN,
+            sizeof(app_button_event_t));
+
+    if (s_button_event_queue == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create button event queue");
+    }
+
+    BaseType_t button_task_result = xTaskCreate(
+        app_button_task,
+        "button",
+        2048,
+        NULL,
+        5,
+        NULL);
+
+    if (button_task_result != pdPASS) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create button task");
+    }
+
     ESP_LOGI(
         TAG,
         "Logger ready. Hold button for 2s to toggle logging.");
 
-    /*
-     * Fixed-period snapshot scheduler.
-     *
-     * Snapshot generation is independent of FOUT edge events.
-     * FOUT capture only updates the latest CDM324 measurement.
-     */
     const app_config_t *config = app_config_get();
 
     uint32_t next_snapshot_time_us =
         (uint32_t)esp_timer_get_time();
 
     while (1) {
-        app_handle_button();
+
+        /*
+         * Process button events in the main task.
+         *
+         * The button task only detects the long press and
+         * sends this lightweight event. SD/FAT/OLED operations
+         * are intentionally kept out of the button task.
+         */
+        app_button_event_t button_event;
+
+        if (s_button_event_queue != NULL &&
+            xQueueReceive(
+                s_button_event_queue,
+                &button_event,
+                0) == pdTRUE) {
+
+            if (button_event == APP_BUTTON_EVENT_LONG_PRESS) {
+                app_toggle_logging();
+            }
+        }
 
         const uint32_t now_us =
             (uint32_t)esp_timer_get_time();
@@ -198,10 +269,6 @@ void app_main(void)
             cdm324_snapshot_t snapshot;
 
             if (cdm324_get_latest_snapshot(&snapshot)) {
-                /*
-                 * This timestamp represents the actual
-                 * fixed-period sampling time, not the FOUT edge time.
-                 */
                 snapshot.time_us = now_us;
 
                 app_show_oled_status(&snapshot);
