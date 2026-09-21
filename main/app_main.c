@@ -65,7 +65,7 @@ static void app_show_oled_status(
     if (
         (now_ms -
          s_last_oled_update_ms) <
-        1000U
+        200U
     ) {
         return;
     }
