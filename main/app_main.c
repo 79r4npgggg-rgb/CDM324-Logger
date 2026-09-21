@@ -18,7 +18,7 @@ static const char *TAG = "app_main";
 
 #define APP_BUTTON_POLL_MS       10U
 #define APP_BUTTON_LONG_PRESS_MS 2000U
-#define APP_LOG_TICK_MS          1U
+#define APP_LOG_TICK_MS          10U
 
 static bool s_logging_enabled = false;
 static uint32_t s_last_oled_update_ms = 0U;
@@ -217,7 +217,6 @@ void app_main(void)
                     };
 
                     csv_logger_queue_snapshot(&csv_snapshot);
-                    csv_logger_flush_pending();
                 }
             }
         }

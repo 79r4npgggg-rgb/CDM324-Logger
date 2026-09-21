@@ -12,6 +12,7 @@
 
 static const char *TAG = "csv_logger";
 static QueueHandle_t s_snapshot_queue = NULL;
+static TaskHandle_t s_writer_task = NULL;
 static uint32_t s_overflow_count = 0;
 static uint32_t s_dropped_samples = 0;
 static bool s_logging_enabled = false;
@@ -32,16 +33,84 @@ snprintf(out, out_size,
          (unsigned long)snapshot->status);
 }
 
+static void csv_logger_writer_task(void *arg)
+{
+    (void)arg;
+
+    FILE *fp = NULL;
+
+    while (1) {
+        csv_snapshot_t snapshot;
+
+        if (xQueueReceive(
+                s_snapshot_queue,
+                &snapshot,
+                pdMS_TO_TICKS(10)) == pdTRUE) {
+
+            if (fp == NULL) {
+                fp = fopen(SDCARD_LOG_FILENAME, "a");
+
+                if (fp == NULL) {
+                    ESP_LOGE(
+                        TAG,
+                        "Unable to open %s for append",
+                        SDCARD_LOG_FILENAME);
+                    continue;
+                }
+            }
+
+            char line[APP_CSV_LINE_MAX_LEN];
+
+            csv_logger_format_line(
+                line,
+                sizeof(line),
+                &snapshot);
+
+            if (fputs(line, fp) == EOF) {
+                ESP_LOGE(TAG, "Failed to write CSV");
+                fclose(fp);
+                fp = NULL;
+                continue;
+            }
+
+            fflush(fp);
+        } else if (!s_logging_enabled && fp != NULL) {
+            fclose(fp);
+            fp = NULL;
+        }
+    }
+}
+
 bool csv_logger_init(void)
 {
     const app_config_t *config = app_config_get();
-    s_snapshot_queue = xQueueCreate(config->csv_buffer_lines, sizeof(csv_snapshot_t));
+
+    s_snapshot_queue =
+        xQueueCreate(
+            config->csv_buffer_lines,
+            sizeof(csv_snapshot_t));
+
     if (s_snapshot_queue == NULL) {
         ESP_LOGE(TAG, "Failed to create CSV queue");
         return false;
     }
 
     s_logging_enabled = false;
+
+    BaseType_t result = xTaskCreate(
+        csv_logger_writer_task,
+        "csv_writer",
+        4096,
+        NULL,
+        4,
+        &s_writer_task);
+
+    if (result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create CSV writer task");
+        s_writer_task = NULL;
+        return false;
+    }
+
     return true;
 }
 
@@ -59,64 +128,32 @@ bool csv_logger_queue_snapshot(const csv_snapshot_t *snapshot)
     return true;
 }
 
-bool csv_logger_flush_pending(void)
-{
-    if (s_snapshot_queue == NULL || !s_logging_enabled) {
-        return true;
-    }
-
-    csv_snapshot_t snapshots[APP_CSV_BUFFER_LINES];
-    size_t count = 0;
-
-    while (count < APP_CSV_BUFFER_LINES && xQueueReceive(s_snapshot_queue, &snapshots[count], 0) == pdTRUE) {
-        count++;
-    }
-
-    if (count == 0) {
-        return true;
-    }
-
-    FILE *fp = fopen(SDCARD_LOG_FILENAME, "a");
-    if (fp == NULL) {
-        ESP_LOGE(TAG, "Unable to open %s for append", SDCARD_LOG_FILENAME);
-        return false;
-    }
-
-    for (size_t i = 0; i < count; ++i) {
-        char line[APP_CSV_LINE_MAX_LEN];
-        csv_logger_format_line(line, sizeof(line), &snapshots[i]);
-        if (fputs(line, fp) == EOF) {
-            fclose(fp);
-            ESP_LOGE(TAG, "Failed to write CSV batch");
-            return false;
-        }
-    }
-
-    fflush(fp);
-    fclose(fp);
-    return true;
-}
-
 bool csv_logger_set_logging_enabled(bool enabled)
 {
-    s_logging_enabled = enabled;
-    if (!enabled) {
-        return csv_logger_flush_pending();
-    }
+    if (enabled) {
+        FILE *fp = fopen(SDCARD_LOG_FILENAME, "w");
 
-    FILE *fp = fopen(SDCARD_LOG_FILENAME, "w");
-    if (fp == NULL) {
-        ESP_LOGE(TAG, "Unable to create %s", SDCARD_LOG_FILENAME);
-        return false;
-    }
+        if (fp == NULL) {
+            ESP_LOGE(
+                TAG,
+                "Unable to create %s",
+                SDCARD_LOG_FILENAME);
+            return false;
+        }
 
-    if (fputs(CSV_LOG_HEADER, fp) == EOF) {
+        if (fputs(CSV_LOG_HEADER, fp) == EOF) {
+            fclose(fp);
+            ESP_LOGE(TAG, "Failed to write CSV header");
+            return false;
+        }
+
         fclose(fp);
-        ESP_LOGE(TAG, "Failed to write CSV header");
-        return false;
+
+        s_logging_enabled = true;
+        return true;
     }
 
-    fclose(fp);
+    s_logging_enabled = false;
     return true;
 }
 

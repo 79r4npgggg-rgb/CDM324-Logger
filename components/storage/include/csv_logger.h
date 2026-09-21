@@ -17,7 +17,6 @@ typedef struct {
 
 bool csv_logger_init(void);
 bool csv_logger_queue_snapshot(const csv_snapshot_t *snapshot);
-bool csv_logger_flush_pending(void);
 bool csv_logger_set_logging_enabled(bool enabled);
 bool csv_logger_is_logging_enabled(void);
 void csv_logger_set_overflow(uint32_t overflow_count, uint32_t dropped_samples);
