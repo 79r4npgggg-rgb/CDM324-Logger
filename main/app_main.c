@@ -471,14 +471,31 @@ void app_main(void)
 
 if (csv_logger_is_logging_enabled()) {
     if (snapshot.time_us != s_last_logged_snapshot_time_us) {
-        csv_snapshot_t csv_snapshot = {
-            .time_us = snapshot.time_us,
-            .aout_dc_mv = snapshot.aout_dc_mv,
-            .aout_rms_mv = snapshot.aout_rms_mv,
-            .aout_pp_mv = snapshot.aout_pp_mv,
-            .doppler_hz = snapshot.doppler_hz,
-            .status = snapshot.status,
-        };
+    csv_snapshot_t csv_snapshot = {
+        .time_us = snapshot.time_us,
+        .aout_dc_mv = snapshot.aout_dc_mv,
+        .aout_rms_mv = snapshot.aout_rms_mv,
+        .aout_pp_mv = snapshot.aout_pp_mv,
+        .doppler_hz = snapshot.doppler_hz,
+        .status = snapshot.status,
+        .peak_count = snapshot.peak_count,
+    };
+
+    for (uint32_t i = 0;
+         i < CSV_MAX_PEAKS;
+        ++i) {
+
+        csv_snapshot.peaks[i].frequency_hz =
+            snapshot.peaks[i].frequency_hz;
+
+        csv_snapshot.peaks[i].power =
+            snapshot.peaks[i].power;
+    }
+
+if (csv_logger_queue_snapshot(&csv_snapshot)) {
+    s_last_logged_snapshot_time_us =
+        snapshot.time_us;
+}
 
         if (csv_logger_queue_snapshot(&csv_snapshot)) {
             s_last_logged_snapshot_time_us = snapshot.time_us;

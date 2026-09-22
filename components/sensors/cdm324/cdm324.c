@@ -48,31 +48,35 @@ static const char *TAG = "cdm324";
 /*
  * FFT size.
  *
- * 2048 samples at 20 kHz:
+ * 4096 samples at 20 kHz:
  *
- *   2048 / 20000 = 102.4 ms
+ *   4096 / 20000 = 204.8 ms
  *
  * Frequency resolution:
  *
- *   20000 / 2048 = 9.765625 Hz
- *
- * This is intentionally modest for the first implementation.
+ *   20000 / 4096 = 4.8828125 Hz
  */
-#define CDM324_FFT_SIZE           2048U
-
-#define CDM324_ADC_FRAME_SIZE     512U
-#define CDM324_ADC_POOL_SIZE      4096U
+#define CDM324_FFT_SIZE           4096U
 
 /*
- * Ignore the very-low-frequency bins when searching for
- * the Doppler peak.
+ * Frequency range used for peak observation.
  *
- * Bin width is approximately 9.77 Hz.
- *
- * Starting at bin 2 means approximately 19.5 Hz.
+ * 20 Hz is kept as the lower boundary for this commit.
+ * The purpose of this commit is to increase FFT resolution
+ * and observe the spectrum; the lower-frequency boundary
+ * can be revisited after examining the data.
  */
-#define CDM324_FFT_MIN_BIN 2U
-#define CDM324_FFT_MAX_BIN 512U
+#define CDM324_FFT_MIN_FREQ_HZ    20U
+#define CDM324_FFT_MAX_FREQ_HZ    5000U
+
+/*
+ * Minimum separation between detected local peaks.
+ *
+ * 3 bins at 4096-point FFT:
+ *
+ *   3 * 4.8828125 = 14.65 Hz
+ */
+#define CDM324_PEAK_MIN_DISTANCE_BINS  3U
 
 /*
  * Aout is divided before GPIO1.
@@ -147,6 +151,17 @@ static float s_samples_mv[CDM324_FFT_SIZE];
 
 
 /*
+ * ADC samples for one FFT frame.
+ *
+ * 4096 samples * 2 bytes = 8192 bytes.
+ *
+ * This is intentionally static rather than allocated on
+ * the analysis task stack.
+ */
+static uint16_t s_adc_samples[CDM324_FFT_SIZE];
+
+
+/*
  * ============================================================
  * Forward declarations
  * ============================================================
@@ -165,6 +180,9 @@ static void cdm324_analyze_frame(
 static void cdm324_analysis_task(
     void *arg);
 
+static uint32_t cdm324_find_spectral_peaks(
+    cdm324_peak_t *peaks,
+    uint32_t max_peaks);
 
 /*
  * ============================================================
@@ -415,6 +433,142 @@ static bool cdm324_read_frame(
     return true;
 }
 
+
+/*
+ * ============================================================
+ * Spectral peak detection
+ * ============================================================
+ *
+ * Detect local maxima in the positive-frequency spectrum.
+ *
+ * This function does not rank peaks by power.
+ *
+ * The spectrum is scanned from low frequency to high
+ * frequency, and accepted local maxima are stored in that
+ * order.
+ *
+ * This is intentionally a diagnostic implementation.
+ * It does not yet decide which peak represents vehicle speed.
+ */
+static uint32_t cdm324_find_spectral_peaks(
+    cdm324_peak_t *peaks,
+    uint32_t max_peaks)
+{
+    if (peaks == NULL || max_peaks == 0U) {
+        return 0U;
+    }
+
+    const float bin_hz =
+        (float)CDM324_ADC_SAMPLE_RATE_HZ /
+        (float)CDM324_FFT_SIZE;
+
+    size_t min_bin =
+        (size_t)ceilf(
+            (float)CDM324_FFT_MIN_FREQ_HZ /
+            bin_hz);
+
+    size_t max_bin =
+        (size_t)floorf(
+            (float)CDM324_FFT_MAX_FREQ_HZ /
+            bin_hz);
+
+    /*
+     * Need bin-1 and bin+1 for local-maximum detection.
+     */
+    if (min_bin < 1U) {
+        min_bin = 1U;
+    }
+
+    if (max_bin >= (CDM324_FFT_SIZE / 2U) - 1U) {
+        max_bin =
+            (CDM324_FFT_SIZE / 2U) - 2U;
+    }
+
+    uint32_t peak_count = 0U;
+
+    size_t last_peak_bin = 0U;
+    bool have_last_peak = false;
+
+    for (size_t bin = min_bin;
+         bin <= max_bin;
+         ++bin) {
+
+        const float prev_real =
+            s_fft_data[(bin - 1U) * 2U];
+
+        const float prev_imag =
+            s_fft_data[(bin - 1U) * 2U + 1U];
+
+        const float real =
+            s_fft_data[bin * 2U];
+
+        const float imag =
+            s_fft_data[bin * 2U + 1U];
+
+        const float next_real =
+            s_fft_data[(bin + 1U) * 2U];
+
+        const float next_imag =
+            s_fft_data[(bin + 1U) * 2U + 1U];
+
+        const float prev_power =
+            prev_real * prev_real +
+            prev_imag * prev_imag;
+
+        const float power =
+            real * real +
+            imag * imag;
+
+        const float next_power =
+            next_real * next_real +
+            next_imag * next_imag;
+
+        /*
+         * Local maximum.
+         *
+         * Equal power on the right side is accepted so that
+         * a flat-topped peak is not unnecessarily rejected.
+         */
+        if (power <= prev_power ||
+            power < next_power) {
+
+            continue;
+        }
+
+        /*
+         * Do not record peaks that are too close together.
+         *
+         * We keep the lower-frequency peak because this
+         * function intentionally scans from low to high
+         * frequency.
+         */
+        if (have_last_peak &&
+            (bin - last_peak_bin) <
+                CDM324_PEAK_MIN_DISTANCE_BINS) {
+
+            continue;
+        }
+
+        peaks[peak_count].frequency_hz =
+            (int32_t)lroundf(
+                (float)bin * bin_hz);
+
+        peaks[peak_count].power =
+            power;
+
+        peak_count++;
+
+        last_peak_bin = bin;
+        have_last_peak = true;
+
+        if (peak_count >= max_peaks) {
+            break;
+        }
+    }
+
+    return peak_count;
+}
+
 /*
  * ============================================================
  * Analyze one FFT frame
@@ -594,38 +748,55 @@ static void cdm324_analyze_frame(
     }
 
 
-    /*
-     * --------------------------------------------------------
-     * Find strongest positive-frequency bin
-     * --------------------------------------------------------
-     */
+/*
+ * --------------------------------------------------------
+ * Find strongest positive-frequency bin
+ * --------------------------------------------------------
+ *
+ * Kept for comparison with the previous implementation.
+ * This is NOT yet treated as a validated vehicle-speed
+ * estimate.
+ */
 
-    float max_power = 0.0f;
-    size_t max_bin = 0;
+const float bin_hz =
+    (float)CDM324_ADC_SAMPLE_RATE_HZ /
+    (float)CDM324_FFT_SIZE;
 
+const size_t min_bin =
+    (size_t)ceilf(
+        (float)CDM324_FFT_MIN_FREQ_HZ /
+        bin_hz);
 
-for (size_t bin = CDM324_FFT_MIN_BIN;
-     bin <= CDM324_FFT_MAX_BIN;
+const size_t max_bin =
+    (size_t)floorf(
+        (float)CDM324_FFT_MAX_FREQ_HZ /
+        bin_hz);
+
+float max_power = 0.0f;
+size_t max_bin_found = min_bin;
+
+for (size_t bin = min_bin;
+     bin <= max_bin;
      ++bin) {
 
-        const float real =
-            s_fft_data[bin * 2U];
+    const float real =
+        s_fft_data[bin * 2U];
 
-        const float imag =
-            s_fft_data[bin * 2U + 1U];
+    const float imag =
+        s_fft_data[bin * 2U + 1U];
 
+    const float power =
+        real * real +
+        imag * imag;
 
-        const float power =
-            real * real +
-            imag * imag;
-
-
-        if (power > max_power) {
-
-            max_power = power;
-            max_bin = bin;
-        }
+    if (power > max_power) {
+        max_power = power;
+        max_bin_found = bin;
     }
+}
+
+    const float doppler_hz =
+        (float)max_bin_found * bin_hz;
 
 
     const float bin_hz =
@@ -662,6 +833,30 @@ for (size_t bin = CDM324_FFT_MIN_BIN;
         (int32_t)lroundf(doppler_hz);
 }
 
+/*
+ * --------------------------------------------------------
+ * Detect local spectral peaks
+ * --------------------------------------------------------
+ */
+
+s_latest_snapshot.doppler_hz =
+    (int32_t)lroundf(doppler_hz);
+
+s_latest_snapshot.peak_count = 0U;
+
+for (size_t i = 0;
+     i < CDM324_MAX_PEAKS;
+     ++i) {
+
+    s_latest_snapshot.peaks[i].frequency_hz = 0;
+    s_latest_snapshot.peaks[i].power = 0.0f;
+}
+
+s_latest_snapshot.peak_count =
+    cdm324_find_spectral_peaks(
+        s_latest_snapshot.peaks,
+        CDM324_MAX_PEAKS);
+
 
 /*
  * ============================================================
@@ -674,9 +869,6 @@ static void cdm324_analysis_task(
 {
     (void)arg;
 
-    uint16_t samples[CDM324_FFT_SIZE];
-
-
     ESP_LOGI(
         TAG,
         "Aout analysis task started");
@@ -685,7 +877,7 @@ static void cdm324_analysis_task(
     while (s_running) {
 
         if (!cdm324_read_frame(
-                samples,
+                s_adc_samples,
                 CDM324_FFT_SIZE)) {
 
             s_latest_snapshot.status =
@@ -698,7 +890,7 @@ static void cdm324_analysis_task(
         }
 
 
-        cdm324_analyze_frame(samples);
+        cdm324_analyze_frame(s_adc_samples);
     }
 
 

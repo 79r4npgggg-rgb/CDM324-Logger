@@ -33,24 +33,63 @@ static void csv_logger_format_line(
         return;
     }
 
+    int offset =
+        snprintf(
+            out,
+            out_size,
 
-    snprintf(
-        out,
-        out_size,
+            "%lu,%ld,%ld,%ld,%ld,%lu,%lu",
 
-        "%lu,%ld,%ld,%ld,%ld,%lu\n",
+            (unsigned long)snapshot->time_us,
 
-        (unsigned long)snapshot->time_us,
+            (long)snapshot->aout_dc_mv,
 
-        (long)snapshot->aout_dc_mv,
+            (long)snapshot->aout_rms_mv,
 
-        (long)snapshot->aout_rms_mv,
+            (long)snapshot->aout_pp_mv,
 
-        (long)snapshot->aout_pp_mv,
+            (long)snapshot->doppler_hz,
 
-        (long)snapshot->doppler_hz,
+            (unsigned long)snapshot->status,
 
-        (unsigned long)snapshot->status);
+            (unsigned long)snapshot->peak_count);
+
+    if (offset < 0 ||
+        (size_t)offset >= out_size) {
+
+        return;
+    }
+
+    for (uint32_t i = 0;
+         i < CSV_MAX_PEAKS;
+         ++i) {
+
+        const int written =
+            snprintf(
+                out + offset,
+                out_size - (size_t)offset,
+
+                ",%ld,%.6e",
+
+                (long)snapshot->peaks[i].frequency_hz,
+
+                (double)snapshot->peaks[i].power);
+
+        if (written < 0 ||
+            (size_t)written >=
+                out_size - (size_t)offset) {
+
+            return;
+        }
+
+        offset += written;
+    }
+
+    if ((size_t)offset + 2U < out_size) {
+
+        out[offset++] = '\n';
+        out[offset] = '\0';
+    }
 }
 
 
