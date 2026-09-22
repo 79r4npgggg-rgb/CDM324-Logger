@@ -57,6 +57,8 @@ static const char *TAG = "cdm324";
  *   20000 / 4096 = 4.8828125 Hz
  */
 #define CDM324_FFT_SIZE           4096U
+#define CDM324_ADC_FRAME_SIZE     512U
+#define CDM324_ADC_POOL_SIZE      4096U
 
 /*
  * Frequency range used for peak observation.
@@ -66,7 +68,7 @@ static const char *TAG = "cdm324";
  * and observe the spectrum; the lower-frequency boundary
  * can be revisited after examining the data.
  */
-#define CDM324_FFT_MIN_FREQ_HZ    20U
+#define CDM324_FFT_MIN_FREQ_HZ    1U
 #define CDM324_FFT_MAX_FREQ_HZ    5000U
 
 /*
@@ -473,15 +475,25 @@ static uint32_t cdm324_find_spectral_peaks(
             bin_hz);
 
     /*
-     * Need bin-1 and bin+1 for local-maximum detection.
+     * Bin 0 is DC.
+     *
+     * Local-maximum detection also needs bin-1 and bin+1,
+     * so the search must start at bin 1 and stop before
+     * the Nyquist bin.
      */
     if (min_bin < 1U) {
         min_bin = 1U;
     }
 
-    if (max_bin >= (CDM324_FFT_SIZE / 2U) - 1U) {
-        max_bin =
-            (CDM324_FFT_SIZE / 2U) - 2U;
+    const size_t nyquist_bin =
+        CDM324_FFT_SIZE / 2U;
+
+    if (max_bin >= nyquist_bin) {
+        max_bin = nyquist_bin - 1U;
+    }
+
+    if (min_bin >= max_bin) {
+        return 0U;
     }
 
     uint32_t peak_count = 0U;
@@ -524,23 +536,23 @@ static uint32_t cdm324_find_spectral_peaks(
             next_imag * next_imag;
 
         /*
-         * Local maximum.
+         * Local maximum:
          *
-         * Equal power on the right side is accepted so that
-         * a flat-topped peak is not unnecessarily rejected.
+         *       power >= previous
+         *       power >  next
+         *
+         * This also avoids selecting every bin of a flat-topped
+         * spectral component.
          */
-        if (power <= prev_power ||
-            power < next_power) {
+        if (power < prev_power ||
+            power <= next_power) {
 
             continue;
         }
 
         /*
-         * Do not record peaks that are too close together.
-         *
-         * We keep the lower-frequency peak because this
-         * function intentionally scans from low to high
-         * frequency.
+         * Prevent multiple very-close local maxima from
+         * occupying the peak list.
          */
         if (have_last_peak &&
             (bin - last_peak_bin) <
@@ -712,100 +724,53 @@ static void cdm324_analyze_frame(
 
     /*
      * --------------------------------------------------------
-     * FFT
+     * Find strongest positive-frequency bin
      * --------------------------------------------------------
+     *
+     * Kept for comparison with the previous implementation.
+     * This is NOT yet treated as a validated vehicle-speed
+     * estimate.
      */
-
-    esp_err_t ret =
-        dsps_fft2r_fc32(
-            s_fft_data,
-            CDM324_FFT_SIZE);
-
-
-    if (ret != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "FFT failed: %d",
-            (int)ret);
-
-        return;
-    }
-
-
-    ret =
-        dsps_bit_rev_fc32(
-            s_fft_data,
-            CDM324_FFT_SIZE);
-
-
-    if (ret != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "FFT bit reverse failed: %d",
-            (int)ret);
-
-        return;
-    }
-
-
-/*
- * --------------------------------------------------------
- * Find strongest positive-frequency bin
- * --------------------------------------------------------
- *
- * Kept for comparison with the previous implementation.
- * This is NOT yet treated as a validated vehicle-speed
- * estimate.
- */
-
-const float bin_hz =
-    (float)CDM324_ADC_SAMPLE_RATE_HZ /
-    (float)CDM324_FFT_SIZE;
-
-const size_t min_bin =
-    (size_t)ceilf(
-        (float)CDM324_FFT_MIN_FREQ_HZ /
-        bin_hz);
-
-const size_t max_bin =
-    (size_t)floorf(
-        (float)CDM324_FFT_MAX_FREQ_HZ /
-        bin_hz);
-
-float max_power = 0.0f;
-size_t max_bin_found = min_bin;
-
-for (size_t bin = min_bin;
-     bin <= max_bin;
-     ++bin) {
-
-    const float real =
-        s_fft_data[bin * 2U];
-
-    const float imag =
-        s_fft_data[bin * 2U + 1U];
-
-    const float power =
-        real * real +
-        imag * imag;
-
-    if (power > max_power) {
-        max_power = power;
-        max_bin_found = bin;
-    }
-}
-
-    const float doppler_hz =
-        (float)max_bin_found * bin_hz;
-
 
     const float bin_hz =
         (float)CDM324_ADC_SAMPLE_RATE_HZ /
         (float)CDM324_FFT_SIZE;
 
+    const size_t min_bin =
+        (size_t)ceilf(
+            (float)CDM324_FFT_MIN_FREQ_HZ /
+            bin_hz);
+
+    const size_t max_bin =
+        (size_t)floorf(
+            (float)CDM324_FFT_MAX_FREQ_HZ /
+            bin_hz);
+
+    float max_power = 0.0f;
+    size_t max_bin_found = min_bin;
+
+    for (size_t bin = min_bin;
+         bin <= max_bin;
+         ++bin) {
+
+        const float real =
+            s_fft_data[bin * 2U];
+
+        const float imag =
+            s_fft_data[bin * 2U + 1U];
+
+        const float power =
+            real * real +
+            imag * imag;
+
+        if (power > max_power) {
+            max_power = power;
+            max_bin_found = bin;
+        }
+    }
 
     const float doppler_hz =
-        (float)max_bin * bin_hz;
+        (float)max_bin_found * bin_hz;
 
 
     /*
@@ -831,31 +796,19 @@ for (size_t bin = min_bin;
 
     s_latest_snapshot.doppler_hz =
         (int32_t)lroundf(doppler_hz);
+
+
+    /*
+     * --------------------------------------------------------
+     * Detect local spectral peaks
+     * --------------------------------------------------------
+     */
+
+    s_latest_snapshot.peak_count =
+        cdm324_find_spectral_peaks(
+            s_latest_snapshot.peaks,
+            CDM324_MAX_PEAKS);
 }
-
-/*
- * --------------------------------------------------------
- * Detect local spectral peaks
- * --------------------------------------------------------
- */
-
-s_latest_snapshot.doppler_hz =
-    (int32_t)lroundf(doppler_hz);
-
-s_latest_snapshot.peak_count = 0U;
-
-for (size_t i = 0;
-     i < CDM324_MAX_PEAKS;
-     ++i) {
-
-    s_latest_snapshot.peaks[i].frequency_hz = 0;
-    s_latest_snapshot.peaks[i].power = 0.0f;
-}
-
-s_latest_snapshot.peak_count =
-    cdm324_find_spectral_peaks(
-        s_latest_snapshot.peaks,
-        CDM324_MAX_PEAKS);
 
 
 /*
