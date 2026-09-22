@@ -71,7 +71,8 @@ static const char *TAG = "cdm324";
  *
  * Starting at bin 2 means approximately 19.5 Hz.
  */
-#define CDM324_FFT_MIN_BIN        2U
+#define CDM324_FFT_MIN_BIN 2U
+#define CDM324_FFT_MAX_BIN 512U
 
 /*
  * Aout is divided before GPIO1.
@@ -603,11 +604,9 @@ static void cdm324_analyze_frame(
     size_t max_bin = 0;
 
 
-    for (
-        size_t bin = CDM324_FFT_MIN_BIN;
-        bin < CDM324_FFT_SIZE / 2U;
-        ++bin
-    ) {
+for (size_t bin = CDM324_FFT_MIN_BIN;
+     bin <= CDM324_FFT_MAX_BIN;
+     ++bin) {
 
         const float real =
             s_fft_data[bin * 2U];

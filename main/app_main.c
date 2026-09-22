@@ -24,6 +24,8 @@ static const char *TAG = "app_main";
 
 static bool s_logging_enabled = false;
 
+static uint32_t s_last_logged_snapshot_time_us = 0U;
+
 static uint32_t s_last_oled_update_ms = 0U;
 
 
@@ -137,6 +139,9 @@ static void app_toggle_logging(void)
             ? "enabled"
             : "disabled");
 
+    if (s_logging_enabled) {
+       s_last_logged_snapshot_time_us = 0U;
+    }
 
     if (board_oled_probe()) {
 
@@ -464,32 +469,22 @@ void app_main(void)
                     &snapshot);
 
 
-                if (s_logging_enabled) {
+if (csv_logger_is_logging_enabled()) {
+    if (snapshot.time_us != s_last_logged_snapshot_time_us) {
+        csv_snapshot_t csv_snapshot = {
+            .time_us = snapshot.time_us,
+            .aout_dc_mv = snapshot.aout_dc_mv,
+            .aout_rms_mv = snapshot.aout_rms_mv,
+            .aout_pp_mv = snapshot.aout_pp_mv,
+            .doppler_hz = snapshot.doppler_hz,
+            .status = snapshot.status,
+        };
 
-                    csv_snapshot_t csv_snapshot = {
-                        .time_us =
-                            snapshot.time_us,
-
-                        .aout_dc_mv =
-                            snapshot.aout_dc_mv,
-
-                        .aout_rms_mv =
-                            snapshot.aout_rms_mv,
-
-                        .aout_pp_mv =
-                            snapshot.aout_pp_mv,
-
-                        .doppler_hz =
-                            snapshot.doppler_hz,
-
-                        .status =
-                            snapshot.status,
-                    };
-
-
-                    csv_logger_queue_snapshot(
-                        &csv_snapshot);
-                }
+        if (csv_logger_queue_snapshot(&csv_snapshot)) {
+            s_last_logged_snapshot_time_us = snapshot.time_us;
+        }
+    }
+}
             }
         }
 
