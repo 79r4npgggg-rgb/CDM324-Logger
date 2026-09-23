@@ -1,6 +1,7 @@
 #include "csv_logger.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -20,6 +21,53 @@ static uint32_t s_dropped_samples = 0;
 
 static bool s_logging_enabled = false;
 
+static char s_log_filename[32] = {0};
+
+static bool csv_logger_select_new_filename(void)
+{
+    for (uint32_t index = 1U;
+         index <= 9999U;
+         ++index) {
+
+        char filename[32];
+
+        snprintf(
+            filename,
+            sizeof(filename),
+            "/sdcard/LOG%04lu.CSV",
+            (unsigned long)index);
+
+        FILE *fp =
+            fopen(filename, "r");
+
+        if (fp == NULL) {
+
+            strncpy(
+                s_log_filename,
+                filename,
+                sizeof(s_log_filename) - 1U);
+
+            s_log_filename[
+                sizeof(s_log_filename) - 1U] =
+                '\0';
+
+            ESP_LOGI(
+                TAG,
+                "Selected log file: %s",
+                s_log_filename);
+
+            return true;
+        }
+
+        fclose(fp);
+    }
+
+    ESP_LOGE(
+        TAG,
+        "No available log filename");
+
+    return false;
+}
 
 static void csv_logger_format_line(
     char *out,
@@ -116,7 +164,7 @@ static void csv_logger_writer_task(
 
                 fp =
                     fopen(
-                        SDCARD_LOG_FILENAME,
+                        s_log_filename,
                         "a");
 
 
@@ -125,7 +173,7 @@ static void csv_logger_writer_task(
                     ESP_LOGE(
                         TAG,
                         "Unable to open %s for append",
-                        SDCARD_LOG_FILENAME);
+                        s_log_filename);
 
                     continue;
                 }
@@ -253,12 +301,17 @@ bool csv_logger_queue_snapshot(
 bool csv_logger_set_logging_enabled(
     bool enabled)
 {
-    if (enabled) {
+if (enabled) {
 
-        FILE *fp =
-            fopen(
-                SDCARD_LOG_FILENAME,
-                "w");
+    if (!csv_logger_select_new_filename()) {
+
+        return false;
+    }
+
+    FILE *fp =
+        fopen(
+            s_log_filename,
+            "w");
 
 
         if (fp == NULL) {
@@ -266,7 +319,7 @@ bool csv_logger_set_logging_enabled(
             ESP_LOGE(
                 TAG,
                 "Unable to create %s",
-                SDCARD_LOG_FILENAME);
+                s_log_filename);
 
             return false;
         }
