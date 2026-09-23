@@ -31,9 +31,6 @@ static uint32_t s_last_oled_update_ms = 0U;
 
 static uint32_t s_last_logged_spectrum_time_us = 0U;
 
-static float s_spectrum_buffer[
-    CDM324_SPECTRUM_BIN_COUNT];
-
 typedef enum {
     APP_BUTTON_RELEASED,
     APP_BUTTON_PRESSED,
@@ -545,37 +542,10 @@ if (spectrum_logger_is_logging_enabled()) {
     if (snapshot.time_us !=
         s_last_logged_spectrum_time_us) {
 
-        uint32_t spectrum_time_us = 0U;
+        if (spectrum_logger_submit_latest()) {
 
-
-        if (cdm324_get_latest_spectrum(
-                s_spectrum_buffer,
-                CDM324_SPECTRUM_BIN_COUNT,
-                &spectrum_time_us)) {
-
-            spectrum_record_t record = {
-                .time_us = spectrum_time_us,
-            };
-
-
-            memcpy(
-                record.power,
-                s_spectrum_buffer,
-                sizeof(record.power));
-
-
-            if (spectrum_logger_queue_record(
-                    &record)) {
-
-                s_last_logged_spectrum_time_us =
-                    spectrum_time_us;
-
-            } else {
-
-                ESP_LOGW(
-                    TAG,
-                    "Spectrum queue full");
-            }
+            s_last_logged_spectrum_time_us =
+                snapshot.time_us;
         }
     }
 }
