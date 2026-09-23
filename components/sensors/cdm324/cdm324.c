@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include "board.h"
 
@@ -33,17 +34,6 @@ static const char *TAG = "cdm324";
  */
 #define CDM324_ADC_CHANNEL       ADC_CHANNEL_0
 
-/*
- * ADC sampling frequency.
- *
- * 20 kHz gives:
- *
- *   Nyquist = 10 kHz
- *
- * and is more than sufficient for the current CDM324
- * Doppler-frequency investigation.
- */
-#define CDM324_ADC_SAMPLE_RATE_HZ    20000U
 
 /*
  * FFT size.
@@ -56,7 +46,6 @@ static const char *TAG = "cdm324";
  *
  *   20000 / 4096 = 4.8828125 Hz
  */
-#define CDM324_FFT_SIZE           4096U
 #define CDM324_ADC_FRAME_SIZE     512U
 #define CDM324_ADC_POOL_SIZE      4096U
 
@@ -139,6 +128,12 @@ static cdm324_snapshot_t s_latest_snapshot;
  */
 static float s_fft_data[CDM324_FFT_SIZE * 2];
 
+static float s_power_spectrum[
+    CDM324_SPECTRUM_BIN_COUNT];
+
+static SemaphoreHandle_t s_spectrum_mutex = NULL;
+
+static uint32_t s_latest_spectrum_time_us = 0U;
 
 /*
  * Hann window.
@@ -505,35 +500,14 @@ static uint32_t cdm324_find_spectral_peaks(
          bin <= max_bin;
          ++bin) {
 
-        const float prev_real =
-            s_fft_data[(bin - 1U) * 2U];
+    const float prev_power =
+        s_power_spectrum[bin - 1U];
 
-        const float prev_imag =
-            s_fft_data[(bin - 1U) * 2U + 1U];
+    const float power =
+        s_power_spectrum[bin];
 
-        const float real =
-            s_fft_data[bin * 2U];
-
-        const float imag =
-            s_fft_data[bin * 2U + 1U];
-
-        const float next_real =
-            s_fft_data[(bin + 1U) * 2U];
-
-        const float next_imag =
-            s_fft_data[(bin + 1U) * 2U + 1U];
-
-        const float prev_power =
-            prev_real * prev_real +
-            prev_imag * prev_imag;
-
-        const float power =
-            real * real +
-            imag * imag;
-
-        const float next_power =
-            next_real * next_real +
-            next_imag * next_imag;
+    const float next_power =
+        s_power_spectrum[bin + 1U];
 
         /*
          * Local maximum:
@@ -600,6 +574,59 @@ static void cdm324_analyze_frame(
     float min_mv = 1000000.0f;
     float max_mv = -1000000.0f;
 
+/*
+ * --------------------------------------------------------
+ * FFT
+ * --------------------------------------------------------
+ */
+
+dsps_fft2r_fc32(
+    s_fft_data,
+    CDM324_FFT_SIZE);
+
+dsps_bit_rev_fc32(
+    s_fft_data,
+    CDM324_FFT_SIZE);
+
+
+/*
+ * --------------------------------------------------------
+ * Power spectrum
+ * --------------------------------------------------------
+ *
+ * Store the complete positive-frequency spectrum:
+ *
+ *   bin 0 ... bin 2048
+ *
+ * The values are raw FFT power:
+ *
+ *   real^2 + imag^2
+ */
+if (xSemaphoreTake(
+        s_spectrum_mutex,
+        portMAX_DELAY) == pdTRUE) {
+
+    for (size_t bin = 0;
+         bin < CDM324_SPECTRUM_BIN_COUNT;
+         ++bin) {
+
+        const float real =
+            s_fft_data[bin * 2U];
+
+        const float imag =
+            s_fft_data[bin * 2U + 1U];
+
+        s_power_spectrum[bin] =
+            real * real +
+            imag * imag;
+    }
+
+    s_latest_spectrum_time_us =
+        (uint32_t)esp_timer_get_time();
+
+    xSemaphoreGive(
+        s_spectrum_mutex);
+}
 
     /*
      * --------------------------------------------------------
@@ -753,15 +780,8 @@ static void cdm324_analyze_frame(
          bin <= max_bin;
          ++bin) {
 
-        const float real =
-            s_fft_data[bin * 2U];
-
-        const float imag =
-            s_fft_data[bin * 2U + 1U];
-
-        const float power =
-            real * real +
-            imag * imag;
+    const float power =
+        s_power_spectrum[bin];
 
         if (power > max_power) {
             max_power = power;
@@ -859,6 +879,19 @@ static void cdm324_analysis_task(
 
 bool cdm324_init(void)
 {
+    s_spectrum_mutex =
+    xSemaphoreCreateMutex();
+
+    if (s_spectrum_mutex == NULL) {
+
+    ESP_LOGE(
+        TAG,
+        "Failed to create spectrum mutex");
+
+    return false;
+    }
+
+
     memset(
         &s_latest_snapshot,
         0,
@@ -1005,6 +1038,48 @@ bool cdm324_get_latest_snapshot(
 
     *out_snapshot =
         s_latest_snapshot;
+
+
+    return true;
+}
+
+bool cdm324_get_latest_spectrum(
+    float *power_out,
+    size_t power_count,
+    uint32_t *time_us_out)
+{
+    if (power_out == NULL ||
+        power_count <
+            CDM324_SPECTRUM_BIN_COUNT ||
+        s_spectrum_mutex == NULL) {
+
+        return false;
+    }
+
+
+    if (xSemaphoreTake(
+            s_spectrum_mutex,
+            pdMS_TO_TICKS(10)) != pdTRUE) {
+
+        return false;
+    }
+
+
+    memcpy(
+        power_out,
+        s_power_spectrum,
+        sizeof(s_power_spectrum));
+
+
+    if (time_us_out != NULL) {
+
+        *time_us_out =
+            s_latest_spectrum_time_us;
+    }
+
+
+    xSemaphoreGive(
+        s_spectrum_mutex);
 
 
     return true;

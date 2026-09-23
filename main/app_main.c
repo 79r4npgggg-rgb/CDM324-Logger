@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "spectrum_logger.h"
 #include "app_config.h"
 #include "board.h"
 #include "cdm324.h"
@@ -28,6 +29,10 @@ static uint32_t s_last_logged_snapshot_time_us = 0U;
 
 static uint32_t s_last_oled_update_ms = 0U;
 
+static uint32_t s_last_logged_spectrum_time_us = 0U;
+
+static float s_spectrum_buffer[
+    CDM324_SPECTRUM_BIN_COUNT];
 
 typedef enum {
     APP_BUTTON_RELEASED,
@@ -109,27 +114,46 @@ static void app_show_oled_status(
 
 static void app_toggle_logging(void)
 {
-    s_logging_enabled =
+    const bool new_enabled =
         !s_logging_enabled;
 
 
     if (!csv_logger_set_logging_enabled(
-            s_logging_enabled)) {
+            new_enabled)) {
 
         ESP_LOGE(
             TAG,
-            "Failed to %s logging",
-            s_logging_enabled
+            "Failed to %s CSV logging",
+            new_enabled
+                ? "start"
+                : "stop");
+
+        return;
+    }
+
+
+    if (!spectrum_logger_set_logging_enabled(
+            new_enabled)) {
+
+        ESP_LOGE(
+            TAG,
+            "Failed to %s spectrum logging",
+            new_enabled
                 ? "start"
                 : "stop");
 
 
-        s_logging_enabled =
-            false;
-
+        /*
+         * Keep CSV and spectrum logging synchronized.
+         */
+        csv_logger_set_logging_enabled(false);
 
         return;
     }
+
+
+    s_logging_enabled =
+        new_enabled;
 
 
     ESP_LOGI(
@@ -139,9 +163,14 @@ static void app_toggle_logging(void)
             ? "enabled"
             : "disabled");
 
+
     if (s_logging_enabled) {
-       s_last_logged_snapshot_time_us = 0U;
+
+        s_last_logged_snapshot_time_us = 0U;
+
+        s_last_logged_spectrum_time_us = 0U;
     }
+
 
     if (board_oled_probe()) {
 
@@ -316,6 +345,13 @@ void app_main(void)
             TAG,
             "CSV logger init failed");
     }
+
+    if (!spectrum_logger_init()) {
+
+    ESP_LOGE(
+        TAG,
+        "Spectrum logger init failed");
+}
 
 
     if (!cdm324_init()) {
@@ -500,6 +536,46 @@ if (csv_logger_is_logging_enabled()) {
 
             s_last_logged_snapshot_time_us =
                 snapshot.time_us;
+        }
+    }
+}
+
+if (spectrum_logger_is_logging_enabled()) {
+
+    if (snapshot.time_us !=
+        s_last_logged_spectrum_time_us) {
+
+        uint32_t spectrum_time_us = 0U;
+
+
+        if (cdm324_get_latest_spectrum(
+                s_spectrum_buffer,
+                CDM324_SPECTRUM_BIN_COUNT,
+                &spectrum_time_us)) {
+
+            spectrum_record_t record = {
+                .time_us = spectrum_time_us,
+            };
+
+
+            memcpy(
+                record.power,
+                s_spectrum_buffer,
+                sizeof(record.power));
+
+
+            if (spectrum_logger_queue_record(
+                    &record)) {
+
+                s_last_logged_spectrum_time_us =
+                    spectrum_time_us;
+
+            } else {
+
+                ESP_LOGW(
+                    TAG,
+                    "Spectrum queue full");
+            }
         }
     }
 }
