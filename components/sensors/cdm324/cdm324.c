@@ -126,8 +126,10 @@ static cdm324_snapshot_t s_latest_snapshot;
  *
  *   2048 complex samples = 4096 floats
  */
+__attribute__((aligned(16)))
 static float s_fft_data[CDM324_FFT_SIZE * 2];
 
+__attribute__((aligned(16)))
 static float s_power_spectrum[
     CDM324_SPECTRUM_BIN_COUNT];
 
@@ -138,6 +140,7 @@ static uint32_t s_latest_spectrum_time_us = 0U;
 /*
  * Hann window.
  */
+__attribute__((aligned(16)))
 static float s_window[CDM324_FFT_SIZE];
 
 
@@ -568,86 +571,41 @@ static void cdm324_analyze_frame(
         return;
     }
 
-
     float sum_mv = 0.0f;
-
     float min_mv = 1000000.0f;
     float max_mv = -1000000.0f;
-
-/*
- * --------------------------------------------------------
- * FFT
- * --------------------------------------------------------
- */
-
-dsps_fft2r_fc32(
-    s_fft_data,
-    CDM324_FFT_SIZE);
-
-dsps_bit_rev_fc32(
-    s_fft_data,
-    CDM324_FFT_SIZE);
-
-
-/*
- * --------------------------------------------------------
- * Power spectrum
- * --------------------------------------------------------
- *
- * Store the complete positive-frequency spectrum:
- *
- *   bin 0 ... bin 2048
- *
- * The values are raw FFT power:
- *
- *   real^2 + imag^2
- */
-if (xSemaphoreTake(
-        s_spectrum_mutex,
-        portMAX_DELAY) == pdTRUE) {
-
-    for (size_t bin = 0;
-         bin < CDM324_SPECTRUM_BIN_COUNT;
-         ++bin) {
-
-        const float real =
-            s_fft_data[bin * 2U];
-
-        const float imag =
-            s_fft_data[bin * 2U + 1U];
-
-        s_power_spectrum[bin] =
-            real * real +
-            imag * imag;
-    }
-
-    s_latest_spectrum_time_us =
-        (uint32_t)esp_timer_get_time();
-
-    xSemaphoreGive(
-        s_spectrum_mutex);
-}
 
     /*
      * --------------------------------------------------------
      * Convert ADC values to mV
      * --------------------------------------------------------
+     *
+     * ADC input is divided by 2 before GPIO1.
+     * Restore the original Aout voltage after ADC conversion.
      */
-
     for (size_t i = 0;
          i < CDM324_FFT_SIZE;
          ++i) {
 
+        const int raw = (int)samples[i];
         int voltage_mv = 0;
 
         if (s_adc_cali_handle != NULL) {
 
-            if (adc_cali_raw_to_voltage(
+            esp_err_t ret =
+                adc_cali_raw_to_voltage(
                     s_adc_cali_handle,
-                    samples[i],
-                    &voltage_mv) != ESP_OK) {
+                    raw,
+                    &voltage_mv);
 
-                voltage_mv = 0;
+            if (ret != ESP_OK) {
+                /*
+                 * Fallback approximation.
+                 *
+                 * This is only used if calibration is unavailable.
+                 */
+                voltage_mv =
+                    (raw * 3100) / 4095;
             }
 
         } else {
@@ -658,9 +616,8 @@ if (xSemaphoreTake(
              * This is only used if calibration is unavailable.
              */
             voltage_mv =
-                ((int)samples[i] * 3100) / 4095;
+                (raw * 3100) / 4095;
         }
-
 
         /*
          * Restore the original Aout voltage
@@ -669,14 +626,11 @@ if (xSemaphoreTake(
         voltage_mv *=
             CDM324_AOUT_DIVIDER_NUMERATOR;
 
-
         s_samples_mv[i] =
             (float)voltage_mv;
 
-
         sum_mv +=
             s_samples_mv[i];
-
 
         if (s_samples_mv[i] < min_mv) {
             min_mv = s_samples_mv[i];
@@ -687,7 +641,11 @@ if (xSemaphoreTake(
         }
     }
 
-
+    /*
+     * --------------------------------------------------------
+     * DC mean
+     * --------------------------------------------------------
+     */
     const float dc_mv =
         sum_mv /
         (float)CDM324_FFT_SIZE;
@@ -698,9 +656,7 @@ if (xSemaphoreTake(
      * AC RMS
      * --------------------------------------------------------
      */
-
     float sum_square = 0.0f;
-
 
     for (size_t i = 0;
          i < CDM324_FFT_SIZE;
@@ -713,12 +669,10 @@ if (xSemaphoreTake(
             ac * ac;
     }
 
-
     const float rms_mv =
         sqrtf(
             sum_square /
             (float)CDM324_FFT_SIZE);
-
 
     const float pp_mv =
         max_mv - min_mv;
@@ -729,9 +683,7 @@ if (xSemaphoreTake(
      * Prepare FFT input
      * --------------------------------------------------------
      *
-     * Remove DC component first.
-     *
-     * Apply Hann window.
+     * Remove DC component and apply Hann window.
      */
     for (size_t i = 0;
          i < CDM324_FFT_SIZE;
@@ -740,12 +692,67 @@ if (xSemaphoreTake(
         const float ac =
             s_samples_mv[i] - dc_mv;
 
-
         s_fft_data[i * 2U] =
             ac * s_window[i];
 
         s_fft_data[i * 2U + 1U] =
             0.0f;
+    }
+
+
+    /*
+     * --------------------------------------------------------
+     * FFT
+     * --------------------------------------------------------
+     */
+    dsps_fft2r_fc32(
+        s_fft_data,
+        CDM324_FFT_SIZE);
+
+    dsps_bit_rev_fc32(
+        s_fft_data,
+        CDM324_FFT_SIZE);
+
+
+    /*
+     * --------------------------------------------------------
+     * Power spectrum
+     * --------------------------------------------------------
+     *
+     * Positive-frequency bins:
+     *
+     *   0 ... N/2
+     *
+     * = 2049 bins for N = 4096.
+     */
+    if (xSemaphoreTake(
+            s_spectrum_mutex,
+            pdMS_TO_TICKS(10)) == pdTRUE) {
+
+        for (size_t bin = 0;
+             bin < CDM324_SPECTRUM_BIN_COUNT;
+             ++bin) {
+
+            const float real =
+                s_fft_data[2U * bin];
+
+            const float imag =
+                s_fft_data[2U * bin + 1U];
+
+            s_power_spectrum[bin] =
+                real * real +
+                imag * imag;
+        }
+
+        /*
+         * Store the timestamp corresponding to
+         * this FFT frame.
+         */
+        s_latest_spectrum_time_us =
+            (uint32_t)esp_timer_get_time();
+
+        xSemaphoreGive(
+            s_spectrum_mutex);
     }
 
 
@@ -758,7 +765,6 @@ if (xSemaphoreTake(
      * This is NOT yet treated as a validated vehicle-speed
      * estimate.
      */
-
     const float bin_hz =
         (float)CDM324_ADC_SAMPLE_RATE_HZ /
         (float)CDM324_FFT_SIZE;
@@ -776,12 +782,17 @@ if (xSemaphoreTake(
     float max_power = 0.0f;
     size_t max_bin_found = min_bin;
 
+    /*
+     * The spectrum is already protected by the mutex
+     * during the copy above. For this diagnostic calculation,
+     * read the resulting spectrum directly.
+     */
     for (size_t bin = min_bin;
          bin <= max_bin;
          ++bin) {
 
-    const float power =
-        s_power_spectrum[bin];
+        const float power =
+            s_power_spectrum[bin];
 
         if (power > max_power) {
             max_power = power;
@@ -798,7 +809,6 @@ if (xSemaphoreTake(
      * Store result
      * --------------------------------------------------------
      */
-
     s_latest_snapshot.time_us =
         (uint32_t)esp_timer_get_time();
 
@@ -823,13 +833,11 @@ if (xSemaphoreTake(
      * Detect local spectral peaks
      * --------------------------------------------------------
      */
-
     s_latest_snapshot.peak_count =
         cdm324_find_spectral_peaks(
             s_latest_snapshot.peaks,
             CDM324_MAX_PEAKS);
 }
-
 
 /*
  * ============================================================
