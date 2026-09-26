@@ -23,6 +23,9 @@
 #define BOARD_SD_SPI_SCLK          GPIO_NUM_7
 #define BOARD_SD_SPI_CS            GPIO_NUM_3
 
+#define BOARD_GPIO_QRE_INPUT   GPIO_NUM_43
+#define BOARD_GPIO_ESC_PWM     GPIO_NUM_44
+
 void board_init(void);
 void board_oled_init(void);
 bool board_oled_probe(void);

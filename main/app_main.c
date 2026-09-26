@@ -13,8 +13,10 @@
 #include "app_config.h"
 #include "board.h"
 #include "cdm324.h"
+#include "qre1113.h"
 #include "csv_logger.h"
 #include "sdcard.h"
+#include "esc_pwm.h"
 
 static const char *TAG = "app_main";
 
@@ -318,6 +320,13 @@ void app_main(void)
 
     board_init();
 
+    if (!esc_pwm_init()) {
+    ESP_LOGE(TAG, "ESC PWM initialization failed");
+    }
+
+    if (!qre1113_init()) {
+        ESP_LOGE(TAG, "QRE1113 initialization failed");
+    }
 
     gpio_set_pull_mode(
         BOARD_GPIO_LOG_BUTTON,
@@ -348,7 +357,7 @@ void app_main(void)
     ESP_LOGE(
         TAG,
         "Spectrum logger init failed");
-}
+    }
 
 
     if (!cdm324_init()) {
@@ -556,5 +565,31 @@ if (spectrum_logger_is_logging_enabled()) {
         vTaskDelay(
             pdMS_TO_TICKS(
                 APP_LOG_TICK_MS));
+    }
+
+    esc_pwm_measurement_t esc_pwm;
+
+    if (esc_pwm_get_latest(&esc_pwm)) {
+            ESP_LOGI(
+            TAG,
+            "ESC PWM: HIGH=%lu us LOW=%lu us PERIOD=%lu us DUTY=%lu.%lu%%",
+            (unsigned long)esc_pwm.high_us,
+            (unsigned long)esc_pwm.low_us,
+            (unsigned long)esc_pwm.period_us,
+            (unsigned long)(esc_pwm.duty_permille / 10),
+            (unsigned long)(esc_pwm.duty_permille % 10)
+    );
+    }
+
+
+    qre1113_measurement_t qre;
+
+    if (qre1113_get_latest(&qre)) {
+        ESP_LOGI(
+            TAG,
+            "QRE RPM: SPUR=%lu RPM MOTOR=%lu RPM",
+            (unsigned long)qre.spur_rpm,
+            (unsigned long)qre.motor_rpm
+        );
     }
 }

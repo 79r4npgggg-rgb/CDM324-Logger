@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "esc_pwm.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_driver_rmt
+        freertos
+        board
+)
