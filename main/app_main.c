@@ -562,34 +562,49 @@ if (spectrum_logger_is_logging_enabled()) {
         }
 
 
+        /*
+         * ----------------------------------------------------
+         * ESC PWM
+         * ----------------------------------------------------
+         */
+
+        esc_pwm_measurement_t esc_pwm;
+
+        if (esc_pwm_get_latest(&esc_pwm)) {
+
+            ESP_LOGI(
+                TAG,
+                "ESC PWM: HIGH=%lu us LOW=%lu us PERIOD=%lu us DUTY=%lu.%lu%%",
+                (unsigned long)esc_pwm.high_us,
+                (unsigned long)esc_pwm.low_us,
+                (unsigned long)esc_pwm.period_us,
+                (unsigned long)(esc_pwm.duty_permille / 10),
+                (unsigned long)(esc_pwm.duty_permille % 10)
+            );
+        }
+
+
+        /*
+         * ----------------------------------------------------
+         * QRE1113 RPM
+         * ----------------------------------------------------
+         */
+
+        qre1113_measurement_t qre;
+
+        if (qre1113_get_latest(&qre)) {
+
+            ESP_LOGI(
+                TAG,
+                "QRE RPM: SPUR=%lu RPM MOTOR=%lu RPM",
+                (unsigned long)qre.spur_rpm,
+                (unsigned long)qre.motor_rpm
+            );
+        }
+
+
         vTaskDelay(
             pdMS_TO_TICKS(
                 APP_LOG_TICK_MS));
-    }
-
-    esc_pwm_measurement_t esc_pwm;
-
-    if (esc_pwm_get_latest(&esc_pwm)) {
-            ESP_LOGI(
-            TAG,
-            "ESC PWM: HIGH=%lu us LOW=%lu us PERIOD=%lu us DUTY=%lu.%lu%%",
-            (unsigned long)esc_pwm.high_us,
-            (unsigned long)esc_pwm.low_us,
-            (unsigned long)esc_pwm.period_us,
-            (unsigned long)(esc_pwm.duty_permille / 10),
-            (unsigned long)(esc_pwm.duty_permille % 10)
-    );
-    }
-
-
-    qre1113_measurement_t qre;
-
-    if (qre1113_get_latest(&qre)) {
-        ESP_LOGI(
-            TAG,
-            "QRE RPM: SPUR=%lu RPM MOTOR=%lu RPM",
-            (unsigned long)qre.spur_rpm,
-            (unsigned long)qre.motor_rpm
-        );
     }
 }
