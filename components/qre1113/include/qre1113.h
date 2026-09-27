@@ -33,3 +33,5 @@ bool qre1113_init(void);
  * Returns true only when a new measurement is available.
  */
 bool qre1113_get_latest(qre1113_measurement_t *measurement);
+
+uint32_t qre1113_get_isr_pulse_count(bool clear_after_read);

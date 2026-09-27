@@ -608,51 +608,54 @@ if (spectrum_logger_is_logging_enabled()) {
         }
 
 
-        /*
-         * ----------------------------------------------------
-         * GPIO input diagnostics
-         * ----------------------------------------------------
-         *
-         * Count both rising and falling edges on:
-         *
-         *   GPIO43 = QRE1113
-         *   GPIO44 = ESC PWM
-         *
-         * This is intentionally independent from
-         * the PCNT/RMT measurement results.
-         */
-        static uint32_t last_input_diag_ms = 0U;
+    /*
+     * ----------------------------------------------------
+     * GPIO input diagnostics
+     * ----------------------------------------------------
+     *
+     * Count both rising and falling edges on:
+     *
+     *   GPIO43 = QRE1113
+     *   GPIO44 = ESC PWM
+     *
+     * This is intentionally independent from
+     * the PCNT/RMT measurement results.
+     */
+    static uint32_t last_input_diag_ms = 0U;
 
-        const uint32_t input_diag_now_ms =
-            (uint32_t)(
-                esp_timer_get_time() /
-                1000ULL);
+    const uint32_t input_diag_now_ms =
+        (uint32_t)(
+            esp_timer_get_time() /
+            1000ULL);
 
-        if (
-            (input_diag_now_ms -
-             last_input_diag_ms) >=
-            500U
-        ) {
-            input_diag_counts_t diag;
+    if (
+        (input_diag_now_ms -
+         last_input_diag_ms) >=
+        500U
+    ) {
+        input_diag_counts_t diag;
 
-            if (input_diag_get_counts(
-                    &diag,
-                    true)) {
+        uint32_t qre_isr_pulses =
+            qre1113_get_isr_pulse_count(true);
 
-                ESP_LOGI(
-                    TAG,
-                    "INPUT DIAG: QRE=%lu edges/500ms ESC=%lu edges/500ms",
-                    (unsigned long)diag.qre_edges,
-                    (unsigned long)diag.esc_edges
-                );
-            }
+        if (input_diag_get_counts(
+                &diag,
+                true)) {
 
-            last_input_diag_ms =
-                input_diag_now_ms;
+            ESP_LOGI(
+                TAG,
+                "INPUT DIAG: QRE=%lu edges/500ms ESC=%lu edges/500ms ISR=%lu pulses/500ms",
+                (unsigned long)diag.qre_edges,
+                (unsigned long)diag.esc_edges,
+                (unsigned long)qre_isr_pulses);
         }
 
-        vTaskDelay(
-            pdMS_TO_TICKS(
-                APP_LOG_TICK_MS));
+        last_input_diag_ms =
+            input_diag_now_ms;
+    }
+
+    vTaskDelay(
+        pdMS_TO_TICKS(
+            APP_LOG_TICK_MS));
     }
 }

@@ -21,6 +21,8 @@ static const char *TAG = "QRE1113";
  */
 #define QRE_MEASUREMENT_INTERVAL_MS 100U
 
+#define QRE_LOW_CONFIRM_US 100U
+
 static pcnt_unit_handle_t s_pcnt_unit = NULL;
 static pcnt_channel_handle_t s_pcnt_channel = NULL;
 
@@ -28,6 +30,53 @@ static qre1113_measurement_t s_latest;
 static volatile bool s_new_measurement = false;
 
 static int64_t s_last_measurement_us = 0;
+
+static volatile int64_t s_low_start_us = 0;
+static volatile uint32_t s_pulse_count = 0;
+
+static volatile uint32_t s_fall_count = 0;
+static volatile uint32_t s_rise_count = 0;
+static volatile uint32_t s_low_confirm_count = 0;
+
+static void IRAM_ATTR qre_gpio_isr_handler(void *arg)
+{
+    const int level =
+        gpio_get_level(BOARD_GPIO_QRE_INPUT);
+
+    const int64_t now_us =
+        esp_timer_get_time();
+
+    if (level == 0) {
+        s_fall_count++;
+
+        if (s_low_start_us == 0) {
+            s_low_start_us = now_us;
+        }
+    } else {
+        s_rise_count++;
+
+        if (s_low_start_us != 0) {
+            const int64_t low_duration_us =
+                now_us - s_low_start_us;
+
+            if (low_duration_us >= QRE_LOW_CONFIRM_US) {
+                s_low_confirm_count++;
+            }
+
+            s_low_start_us = 0;
+        }
+    }
+}
+
+
+typedef enum {
+    QRE_STATE_READY,
+    QRE_STATE_LOW_PENDING,
+    QRE_STATE_LOW_LOCKED,
+} qre_state_t;
+
+static volatile qre_state_t s_qre_state = QRE_STATE_READY;
+static volatile int64_t s_low_candidate_us = 0;
 
 
 /*
@@ -50,6 +99,18 @@ static uint32_t qre_spur_to_motor_rpm(uint32_t spur_rpm)
 }
 
 
+uint32_t qre1113_get_isr_pulse_count(bool clear_after_read)
+{
+    uint32_t count = s_pulse_count;
+
+    if (clear_after_read) {
+        s_pulse_count = 0;
+    }
+
+    return count;
+}
+
+
 bool qre1113_init(void)
 {
     ESP_LOGI(
@@ -69,10 +130,37 @@ bool qre1113_init(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
     };
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+esp_err_t err = gpio_install_isr_service(
+    ESP_INTR_FLAG_IRAM);
+
+if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    ESP_LOGE(
+        TAG,
+        "gpio_install_isr_service failed: %s",
+        esp_err_to_name(err)
+    );
+    return false;
+}
+
+err = gpio_isr_handler_add(
+    BOARD_GPIO_QRE_INPUT,
+    qre_gpio_isr_handler,
+    NULL);
+
+if (err != ESP_OK) {
+    ESP_LOGE(
+        TAG,
+        "gpio_isr_handler_add failed: %s",
+        esp_err_to_name(err)
+    );
+    return false;
+}
+
 
     /*
      * PCNT unit.
@@ -82,7 +170,7 @@ bool qre1113_init(void)
         .low_limit = -32768,
     };
 
-    esp_err_t err = pcnt_new_unit(
+    err = pcnt_new_unit(
         &unit_config,
         &s_pcnt_unit
     );
