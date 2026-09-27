@@ -87,6 +87,20 @@ bool qre1113_init(void)
         &s_pcnt_unit
     );
 
+    const pcnt_glitch_filter_config_t filter_config = {
+        .max_glitch_ns = 500,
+    };
+
+    err = pcnt_unit_set_glitch_filter(
+        s_pcnt_unit,
+        &filter_config
+    );
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set PCNT glitch filter: %s",
+                 esp_err_to_name(err));
+        return false;
+    }
+
     if (err != ESP_OK) {
         ESP_LOGE(
             TAG,
@@ -120,14 +134,14 @@ bool qre1113_init(void)
     }
 
     /*
-     * Count rising edges.
+     * Count falling edges.
      *
-     * Falling edge is ignored.
+     * Rising edge is ignored.
      */
     err = pcnt_channel_set_edge_action(
         s_pcnt_channel,
-        PCNT_CHANNEL_EDGE_ACTION_INCREASE,
-        PCNT_CHANNEL_EDGE_ACTION_HOLD
+        PCNT_CHANNEL_EDGE_ACTION_HOLD,
+        PCNT_CHANNEL_EDGE_ACTION_INCREASE
     );
 
     if (err != ESP_OK) {
@@ -202,6 +216,13 @@ bool qre1113_get_latest(qre1113_measurement_t *measurement)
     esp_err_t err = pcnt_unit_get_count(
         s_pcnt_unit,
         &count
+    );
+
+    ESP_LOGI(
+        TAG,
+        "PCNT raw count=%d elapsed=%lld us",
+        count,
+        elapsed_us
     );
 
     if (err != ESP_OK) {

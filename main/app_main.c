@@ -17,6 +17,7 @@
 #include "csv_logger.h"
 #include "sdcard.h"
 #include "esc_pwm.h"
+#include "input_diag.h"
 
 static const char *TAG = "app_main";
 
@@ -328,6 +329,10 @@ void app_main(void)
         ESP_LOGE(TAG, "QRE1113 initialization failed");
     }
 
+    if (!input_diag_init()) {
+    ESP_LOGE(TAG, "Input diagnostic initialization failed");
+    }
+
     gpio_set_pull_mode(
         BOARD_GPIO_LOG_BUTTON,
         GPIO_PULLUP_ONLY);
@@ -602,6 +607,49 @@ if (spectrum_logger_is_logging_enabled()) {
             );
         }
 
+
+        /*
+         * ----------------------------------------------------
+         * GPIO input diagnostics
+         * ----------------------------------------------------
+         *
+         * Count both rising and falling edges on:
+         *
+         *   GPIO43 = QRE1113
+         *   GPIO44 = ESC PWM
+         *
+         * This is intentionally independent from
+         * the PCNT/RMT measurement results.
+         */
+        static uint32_t last_input_diag_ms = 0U;
+
+        const uint32_t input_diag_now_ms =
+            (uint32_t)(
+                esp_timer_get_time() /
+                1000ULL);
+
+        if (
+            (input_diag_now_ms -
+             last_input_diag_ms) >=
+            500U
+        ) {
+            input_diag_counts_t diag;
+
+            if (input_diag_get_counts(
+                    &diag,
+                    true)) {
+
+                ESP_LOGI(
+                    TAG,
+                    "INPUT DIAG: QRE=%lu edges/500ms ESC=%lu edges/500ms",
+                    (unsigned long)diag.qre_edges,
+                    (unsigned long)diag.esc_edges
+                );
+            }
+
+            last_input_diag_ms =
+                input_diag_now_ms;
+        }
 
         vTaskDelay(
             pdMS_TO_TICKS(

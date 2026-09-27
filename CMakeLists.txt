@@ -9,6 +9,7 @@ set(EXTRA_COMPONENT_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/components/sensors/cdm324"
     "${CMAKE_CURRENT_SOURCE_DIR}/components/esc_pwm"
     "${CMAKE_CURRENT_SOURCE_DIR}/components/qre1113"
+    "${CMAKE_CURRENT_SOURCE_DIR}/components/input_diag"
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
