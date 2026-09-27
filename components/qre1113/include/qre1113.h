@@ -34,4 +34,21 @@ bool qre1113_init(void);
  */
 bool qre1113_get_latest(qre1113_measurement_t *measurement);
 
-uint32_t qre1113_get_isr_pulse_count(bool clear_after_read);
+typedef struct {
+    uint32_t fall_count;
+    uint32_t rise_count;
+
+    uint32_t low_confirm_count;
+    uint32_t low_reject_count;
+
+    uint32_t filtered_pulse_count;
+
+    uint32_t low_min_us;
+    uint32_t low_max_us;
+    uint32_t low_count;
+} qre1113_isr_diag_t;
+
+bool qre1113_get_isr_diag(
+    qre1113_isr_diag_t *diag,
+    bool clear_after_read
+);

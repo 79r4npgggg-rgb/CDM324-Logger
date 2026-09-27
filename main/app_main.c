@@ -329,9 +329,9 @@ void app_main(void)
         ESP_LOGE(TAG, "QRE1113 initialization failed");
     }
 
-    if (!input_diag_init()) {
-    ESP_LOGE(TAG, "Input diagnostic initialization failed");
-    }
+//    if (!input_diag_init()) {
+//    ESP_LOGE(TAG, "Input diagnostic initialization failed");
+//    }
 
     gpio_set_pull_mode(
         BOARD_GPIO_LOG_BUTTON,
@@ -633,22 +633,40 @@ if (spectrum_logger_is_logging_enabled()) {
          last_input_diag_ms) >=
         500U
     ) {
-        input_diag_counts_t diag;
+input_diag_counts_t diag;
+qre1113_isr_diag_t qre_isr_diag;
 
-        uint32_t qre_isr_pulses =
-            qre1113_get_isr_pulse_count(true);
-
-        if (input_diag_get_counts(
-                &diag,
-                true)) {
-
-            ESP_LOGI(
-                TAG,
-                "INPUT DIAG: QRE=%lu edges/500ms ESC=%lu edges/500ms ISR=%lu pulses/500ms",
-                (unsigned long)diag.qre_edges,
-                (unsigned long)diag.esc_edges,
-                (unsigned long)qre_isr_pulses);
-        }
+if (
+    input_diag_get_counts(
+        &diag,
+        true
+    ) &&
+    qre1113_get_isr_diag(
+        &qre_isr_diag,
+        true
+    )
+) {
+    ESP_LOGI(
+        TAG,
+"INPUT DIAG: QRE=%lu edges/500ms ESC=%lu edges/500ms | "
+"ISRFALL=%lu RISE=%lu LOW=%lu CONFIRM=%lu REJECT=%lu "
+"FILTERED=%lu MIN=%luus MAX=%luus",
+(unsigned long)diag.qre_edges,
+(unsigned long)diag.esc_edges,
+(unsigned long)qre_isr_diag.fall_count,
+(unsigned long)qre_isr_diag.rise_count,
+(unsigned long)qre_isr_diag.low_count,
+(unsigned long)qre_isr_diag.low_confirm_count,
+(unsigned long)qre_isr_diag.low_reject_count,
+(unsigned long)qre_isr_diag.filtered_pulse_count,
+(unsigned long)(
+    qre_isr_diag.low_count > 0
+        ? qre_isr_diag.low_min_us
+        : 0
+),
+(unsigned long)qre_isr_diag.low_max_us
+    );
+}
 
         last_input_diag_ms =
             input_diag_now_ms;

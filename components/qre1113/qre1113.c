@@ -21,6 +21,9 @@ static const char *TAG = "QRE1113";
  */
 #define QRE_MEASUREMENT_INTERVAL_MS 100U
 
+#define QRE_LOW_FILTER_US 200U
+#define QRE_MIN_INTERVAL_US 500U
+
 #define QRE_LOW_CONFIRM_US 100U
 
 static pcnt_unit_handle_t s_pcnt_unit = NULL;
@@ -32,11 +35,20 @@ static volatile bool s_new_measurement = false;
 static int64_t s_last_measurement_us = 0;
 
 static volatile int64_t s_low_start_us = 0;
-static volatile uint32_t s_pulse_count = 0;
 
 static volatile uint32_t s_fall_count = 0;
 static volatile uint32_t s_rise_count = 0;
+
 static volatile uint32_t s_low_confirm_count = 0;
+static volatile uint32_t s_low_reject_count = 0;
+
+static volatile uint32_t s_low_min_us = UINT32_MAX;
+static volatile uint32_t s_low_max_us = 0;
+static volatile uint32_t s_low_count = 0;
+static volatile int64_t s_last_filtered_pulse_us = 0;
+static volatile uint32_t s_interval_reject_count = 0;
+
+static volatile uint32_t s_filtered_pulse_count = 0;
 
 static void IRAM_ATTR qre_gpio_isr_handler(void *arg)
 {
@@ -56,27 +68,38 @@ static void IRAM_ATTR qre_gpio_isr_handler(void *arg)
         s_rise_count++;
 
         if (s_low_start_us != 0) {
-            const int64_t low_duration_us =
-                now_us - s_low_start_us;
+            const uint32_t low_duration_us =
+                (uint32_t)(now_us - s_low_start_us);
 
-            if (low_duration_us >= QRE_LOW_CONFIRM_US) {
+            s_low_count++;
+
+            if (low_duration_us < s_low_min_us) {
+                s_low_min_us = low_duration_us;
+            }
+
+            if (low_duration_us > s_low_max_us) {
+                s_low_max_us = low_duration_us;
+            }
+
+            if (low_duration_us >= QRE_LOW_FILTER_US) {
                 s_low_confirm_count++;
+
+            if (
+                s_last_filtered_pulse_us == 0 ||
+                (uint64_t)(now_us - s_last_filtered_pulse_us)
+                    >= QRE_MIN_INTERVAL_US
+            ) {
+                s_filtered_pulse_count++;
+                s_last_filtered_pulse_us = now_us;
+            } else {
+                s_interval_reject_count++;
             }
 
             s_low_start_us = 0;
+            }
         }
     }
 }
-
-
-typedef enum {
-    QRE_STATE_READY,
-    QRE_STATE_LOW_PENDING,
-    QRE_STATE_LOW_LOCKED,
-} qre_state_t;
-
-static volatile qre_state_t s_qre_state = QRE_STATE_READY;
-static volatile int64_t s_low_candidate_us = 0;
 
 
 /*
@@ -99,17 +122,38 @@ static uint32_t qre_spur_to_motor_rpm(uint32_t spur_rpm)
 }
 
 
-uint32_t qre1113_get_isr_pulse_count(bool clear_after_read)
+bool qre1113_get_isr_diag(
+    qre1113_isr_diag_t *diag,
+    bool clear_after_read
+)
 {
-    uint32_t count = s_pulse_count;
-
-    if (clear_after_read) {
-        s_pulse_count = 0;
+    if (diag == NULL) {
+        return false;
     }
 
-    return count;
-}
+    diag->fall_count = s_fall_count;
+    diag->rise_count = s_rise_count;
+    diag->low_confirm_count = s_low_confirm_count;
+    diag->low_reject_count = s_low_reject_count;
+    diag->low_min_us = s_low_min_us;
+    diag->low_max_us = s_low_max_us;
+    diag->low_count = s_low_count;
+    diag->filtered_pulse_count = s_filtered_pulse_count;
 
+    if (clear_after_read) {
+    s_fall_count = 0;
+    s_rise_count = 0;
+
+    s_low_confirm_count = 0;
+    s_low_reject_count = 0;
+
+    s_low_min_us = UINT32_MAX;
+    s_low_max_us = 0;
+    s_low_count = 0;
+    }
+
+    return true;
+}
 
 bool qre1113_init(void)
 {
@@ -152,12 +196,13 @@ err = gpio_isr_handler_add(
     qre_gpio_isr_handler,
     NULL);
 
+ESP_LOGI(
+    TAG,
+    "QRE gpio_isr_handler_add: %s",
+    esp_err_to_name(err)
+);
+
 if (err != ESP_OK) {
-    ESP_LOGE(
-        TAG,
-        "gpio_isr_handler_add failed: %s",
-        esp_err_to_name(err)
-    );
     return false;
 }
 
