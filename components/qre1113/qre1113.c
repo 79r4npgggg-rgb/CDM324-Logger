@@ -21,8 +21,9 @@ static const char *TAG = "QRE1113";
  */
 #define QRE_MEASUREMENT_INTERVAL_MS 100U
 
-#define QRE_LOW_FILTER_US 200U
-#define QRE_MIN_INTERVAL_US 500U
+#define QRE_LOW_FILTER_MIN_US 200U
+#define QRE_LOW_FILTER_MAX_US 10000U
+#define QRE_MIN_INTERVAL_US   500U
 
 #define QRE_LOW_CONFIRM_US 100U
 
@@ -81,24 +82,33 @@ static void IRAM_ATTR qre_gpio_isr_handler(void *arg)
                 s_low_max_us = low_duration_us;
             }
 
-            if (low_duration_us >= QRE_LOW_FILTER_US) {
-                s_low_confirm_count++;
+if (
+    low_duration_us >= QRE_LOW_FILTER_MIN_US &&
+    low_duration_us <= QRE_LOW_FILTER_MAX_US
+) {
+    // LOW durationとしては有効
+    s_low_confirm_count++;
 
-            if (
-                s_last_filtered_pulse_us == 0 ||
-                (uint64_t)(now_us - s_last_filtered_pulse_us)
-                    >= QRE_MIN_INTERVAL_US
-            ) {
-                s_filtered_pulse_count++;
-                s_last_filtered_pulse_us = now_us;
-            } else {
-                s_interval_reject_count++;
-            }
+    // 前回の有効パルスから十分時間が空いているか確認
+    if (
+        s_last_filtered_pulse_us == 0 ||
+        (uint64_t)(now_us - s_last_filtered_pulse_us)
+            >= QRE_MIN_INTERVAL_US
+    ) {
+        s_filtered_pulse_count++;
+        s_last_filtered_pulse_us = now_us;
+    } else {
+        s_interval_reject_count++;
+    }
+} else {
+    // 短すぎる、または長すぎるLOW
+    s_low_reject_count++;
+}
 
             s_low_start_us = 0;
             }
         }
-    }
+    
 }
 
 
@@ -140,7 +150,7 @@ bool qre1113_get_isr_diag(
     diag->low_count = s_low_count;
     diag->filtered_pulse_count = s_filtered_pulse_count;
 
-    if (clear_after_read) {
+if (clear_after_read) {
     s_fall_count = 0;
     s_rise_count = 0;
 
@@ -150,7 +160,10 @@ bool qre1113_get_isr_diag(
     s_low_min_us = UINT32_MAX;
     s_low_max_us = 0;
     s_low_count = 0;
-    }
+
+    s_filtered_pulse_count = 0;
+    s_interval_reject_count = 0;
+}
 
     return true;
 }
