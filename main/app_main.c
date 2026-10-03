@@ -646,26 +646,31 @@ if (
         true
     )
 ) {
-    ESP_LOGI(
-        TAG,
-"INPUT DIAG: QRE=%lu edges/500ms ESC=%lu edges/500ms | "
-"ISRFALL=%lu RISE=%lu LOW=%lu CONFIRM=%lu REJECT=%lu "
-"FILTERED=%lu MIN=%luus MAX=%luus",
-(unsigned long)diag.qre_edges,
-(unsigned long)diag.esc_edges,
-(unsigned long)qre_isr_diag.fall_count,
-(unsigned long)qre_isr_diag.rise_count,
-(unsigned long)qre_isr_diag.low_count,
-(unsigned long)qre_isr_diag.low_confirm_count,
-(unsigned long)qre_isr_diag.low_reject_count,
-(unsigned long)qre_isr_diag.filtered_pulse_count,
-(unsigned long)(
-    qre_isr_diag.low_count > 0
-        ? qre_isr_diag.low_min_us
-        : 0
-),
-(unsigned long)qre_isr_diag.low_max_us
-    );
+const int qre_gpio_level =
+    gpio_get_level(BOARD_GPIO_QRE_INPUT);
+
+ESP_LOGI(
+    TAG,
+    "INPUT DIAG: QRE=%lu edges/500ms ESC=%lu edges/500ms | "
+    "GPIO43=%d | "
+    "ISRFALL=%lu RISE=%lu LOW=%lu CONFIRM=%lu REJECT=%lu "
+    "FILTERED=%lu MIN=%luus MAX=%luus",
+    (unsigned long)diag.qre_edges,
+    (unsigned long)diag.esc_edges,
+    qre_gpio_level,
+    (unsigned long)qre_isr_diag.fall_count,
+    (unsigned long)qre_isr_diag.rise_count,
+    (unsigned long)qre_isr_diag.low_count,
+    (unsigned long)qre_isr_diag.low_confirm_count,
+    (unsigned long)qre_isr_diag.low_reject_count,
+    (unsigned long)qre_isr_diag.filtered_pulse_count,
+    (unsigned long)(
+        qre_isr_diag.low_count > 0
+            ? qre_isr_diag.low_min_us
+            : 0
+    ),
+    (unsigned long)qre_isr_diag.low_max_us
+);
 }
 
         last_input_diag_ms =
