@@ -56,9 +56,14 @@ static QueueHandle_t s_button_event_queue = NULL;
  */
 
 static void app_show_oled_status(
-    const cdm324_snapshot_t *snapshot)
+    const cdm324_snapshot_t *snapshot,
+    const qre1113_measurement_t *qre
+)
 {
-    if (snapshot == NULL) {
+    if (
+        snapshot == NULL ||
+        qre == NULL
+    ) {
         return;
     }
 
@@ -66,9 +71,14 @@ static void app_show_oled_status(
     const uint32_t now_ms =
         (uint32_t)(
             esp_timer_get_time() /
-            1000ULL);
+            1000ULL
+        );
 
 
+    /*
+     * OLED update rate:
+     * 200 ms = 5 Hz
+     */
     if (
         (now_ms -
          s_last_oled_update_ms) <
@@ -84,24 +94,12 @@ static void app_show_oled_status(
 
     if (board_oled_probe()) {
 
-        /*
-         * The old OLED status function is designed
-         * for FOUT frequency and velocity.
-         *
-         * For this first Aout version, show the
-         * Doppler frequency and Aout DC level.
-         */
-        char line[32];
-
-        snprintf(
-            line,
-            sizeof(line),
-            "F:%ld DC:%ld",
-            (long)snapshot->doppler_hz,
-            (long)snapshot->aout_dc_mv);
-
-
-        board_oled_write_text(line);
+        board_oled_show_status(
+            snapshot->doppler_hz,
+            snapshot->aout_dc_mv,
+            qre->motor_rpm,
+            s_logging_enabled
+        );
     }
 }
 
@@ -443,6 +441,10 @@ void app_main(void)
     const app_config_t *config =
         app_config_get();
 
+    qre1113_measurement_t latest_qre = {
+        .spur_rpm = 0,
+        .motor_rpm = 0,
+    };
 
     uint32_t next_log_time_us =
         (uint32_t)esp_timer_get_time();
@@ -512,8 +514,10 @@ void app_main(void)
                     &snapshot)
             ) {
 
-                app_show_oled_status(
-                    &snapshot);
+            app_show_oled_status(
+                &snapshot,
+                &latest_qre
+            );
 
 
 if (csv_logger_is_logging_enabled()) {
@@ -589,23 +593,21 @@ if (spectrum_logger_is_logging_enabled()) {
         }
 
 
-        /*
-         * ----------------------------------------------------
-         * QRE1113 RPM
-         * ----------------------------------------------------
-         */
+/*
+ * ----------------------------------------------------
+ * DRV5033 RPM
+ * ----------------------------------------------------
+ */
 
-        qre1113_measurement_t qre;
+    if (qre1113_get_latest(&latest_qre)) {
 
-        if (qre1113_get_latest(&qre)) {
-
-            ESP_LOGI(
-                TAG,
-                "QRE RPM: SPUR=%lu RPM MOTOR=%lu RPM",
-                (unsigned long)qre.spur_rpm,
-                (unsigned long)qre.motor_rpm
-            );
-        }
+        ESP_LOGI(
+        TAG,
+                "DRV5033 RPM: SPUR=%lu RPM MOTOR=%lu RPM",
+            (unsigned long)latest_qre.spur_rpm,
+            (unsigned long)latest_qre.motor_rpm
+        );
+    }
 
 
     /*

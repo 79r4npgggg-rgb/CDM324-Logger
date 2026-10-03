@@ -196,7 +196,8 @@ void board_oled_write_text(const char *text)
 
 void board_oled_show_status(
     int32_t raw_hz,
-    int32_t velocity_mmps,
+    int32_t aout_dc_mv,
+    uint32_t motor_rpm,
     bool logging_active
 )
 {
@@ -204,19 +205,28 @@ void board_oled_show_status(
         return;
     }
 
+
     char line[32];
 
-    u8g2_ClearBuffer(&s_u8g2);
+
+    u8g2_ClearBuffer(
+        &s_u8g2
+    );
+
 
     /*
+     * ------------------------------------------------------
      * Line 1: title
+     * ------------------------------------------------------
      */
     u8g2_SetFont(
         &s_u8g2,
         u8g2_font_6x10_tf
     );
 
-    u8g2_SetFontPosTop(&s_u8g2);
+    u8g2_SetFontPosTop(
+        &s_u8g2
+    );
 
     u8g2_DrawStr(
         &s_u8g2,
@@ -225,8 +235,11 @@ void board_oled_show_status(
         "CDM324 LOGGER"
     );
 
+
     /*
+     * ------------------------------------------------------
      * Line 2: Doppler frequency
+     * ------------------------------------------------------
      */
     snprintf(
         line,
@@ -242,18 +255,17 @@ void board_oled_show_status(
         line
     );
 
+
     /*
-     * Line 3: Aout DC level
-     *
-     * NOTE:
-     * The existing public argument name is velocity_mmps.
-     * In the current application this value is the Aout DC value.
+     * ------------------------------------------------------
+     * Line 3: Aout DC
+     * ------------------------------------------------------
      */
     snprintf(
         line,
         sizeof(line),
         "DC:%4ld mV",
-        (long)velocity_mmps
+        (long)aout_dc_mv
     );
 
     u8g2_DrawStr(
@@ -263,14 +275,17 @@ void board_oled_show_status(
         line
     );
 
+
     /*
-     * Line 4: logging state
+     * ------------------------------------------------------
+     * Line 4: Motor RPM
+     * ------------------------------------------------------
      */
     snprintf(
         line,
         sizeof(line),
-        "LOG: %s",
-        logging_active ? "ON" : "OFF"
+        "RPM:%5lu",
+        (unsigned long)motor_rpm
     );
 
     u8g2_DrawStr(
@@ -280,6 +295,10 @@ void board_oled_show_status(
         line
     );
 
+
+    /*
+     * Send framebuffer to OLED.
+     */
     oled_send_buffer();
 }
 
