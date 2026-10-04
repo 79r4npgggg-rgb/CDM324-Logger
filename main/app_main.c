@@ -525,15 +525,19 @@ if (csv_logger_is_logging_enabled()) {
     if (snapshot.time_us !=
         s_last_logged_snapshot_time_us) {
 
-        csv_snapshot_t csv_snapshot = {
-            .time_us = snapshot.time_us,
-            .aout_dc_mv = snapshot.aout_dc_mv,
-            .aout_rms_mv = snapshot.aout_rms_mv,
-            .aout_pp_mv = snapshot.aout_pp_mv,
-            .doppler_hz = snapshot.doppler_hz,
-            .status = snapshot.status,
-            .peak_count = snapshot.peak_count,
-        };
+    csv_snapshot_t csv_snapshot = {
+        .time_us = snapshot.time_us,
+        .aout_dc_mv = snapshot.aout_dc_mv,
+        .aout_rms_mv = snapshot.aout_rms_mv,
+        .aout_pp_mv = snapshot.aout_pp_mv,
+        .doppler_hz = snapshot.doppler_hz,
+
+        .spur_rpm = latest_qre.spur_rpm,
+        .motor_rpm = latest_qre.motor_rpm,
+
+        .status = snapshot.status,
+        .peak_count = snapshot.peak_count,
+    };
 
         for (uint32_t i = 0;
              i < CSV_MAX_PEAKS;

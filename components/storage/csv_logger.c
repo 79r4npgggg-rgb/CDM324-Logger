@@ -86,7 +86,7 @@ static void csv_logger_format_line(
             out,
             out_size,
 
-            "%lu,%ld,%ld,%ld,%ld,%lu,%lu",
+            "%lu,%ld,%ld,%ld,%ld,%lu,%lu,%lu,%lu",
 
             (unsigned long)snapshot->time_us,
 
@@ -97,6 +97,10 @@ static void csv_logger_format_line(
             (long)snapshot->aout_pp_mv,
 
             (long)snapshot->doppler_hz,
+
+            (unsigned long)snapshot->spur_rpm,
+
+            (unsigned long)snapshot->motor_rpm,
 
             (unsigned long)snapshot->status,
 
